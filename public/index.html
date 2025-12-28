@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>뜻겹 - 우리말샘 기반 단어 추론</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">뜻겹</div>
+        <div class="subtitle">우리말샘(OpenDict) 뜻풀이 기반 · “설명 가능한” 유사도 추론 게임</div>
+      </div>
+      <div class="actions">
+        <button id="btnHow" class="btn ghost">방법</button>
+        <button id="btnNew" class="btn">새 게임</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>입력</h2>
+        <div class="row">
+          <input id="guessInput" type="text" placeholder="단어 입력 (예: 사과)" autocomplete="off" />
+          <button id="btnGuess" class="btn">추론</button>
+        </div>
+        <div class="muted" id="statusLine">우리말샘에 등록된 단어만 인정됩니다.</div>
+
+        <div class="metrics">
+          <div class="metric"><div class="k">시도</div><div class="v" id="attempts">0</div></div>
+          <div class="metric"><div class="k">경과</div><div class="v mono" id="elapsed">00:00</div></div>
+          <div class="metric"><div class="k">최고점</div><div class="v" id="bestScore">0.0</div></div>
+        </div>
+
+        <div class="hintRow">
+          <button id="btnHint1" class="btn ghost">힌트 1</button>
+          <button id="btnHint2" class="btn ghost">힌트 2</button>
+          <button id="btnReveal" class="btn danger ghost">정답 공개</button>
+        </div>
+        <div class="hints" id="hints"></div>
+
+        <div class="divider"></div>
+        <h3 class="h3">마지막 결과</h3>
+        <div class="simBox">
+          <div class="simHeader">
+            <div class="simTitle" id="lastTitle">아직 없음</div>
+            <div class="simPct mono" id="lastPct">0%</div>
+          </div>
+          <div class="bar"><div class="barFill" id="barFill" style="width:0%"></div></div>
+          <div class="muted small" id="lastWhy">공통 키워드가 여기에 표시됩니다.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>점수 로직 (이해 가능한 유사도)</h2>
+        <ul class="bullets">
+          <li><b>뜻풀이 키워드</b>를 토큰화해서 겹치는 정도를 계산합니다.</li>
+          <li><b>공통 키워드</b>를 그대로 보여주기 때문에 “왜 비슷한지”가 설명됩니다.</li>
+          <li>이상하게 높은 점수를 줄이기 위해 <b>공통 키워드가 거의 없으면 점수를 상한</b> 처리합니다.</li>
+        </ul>
+        <div class="small muted">무제한 입력 가능 · 진행 상황은 자동 저장됩니다.</div>
+      </section>
+
+      <section class="card wide">
+        <div class="row space">
+          <h2>입력 누적</h2>
+          <div class="muted" id="metaLine"></div>
+        </div>
+        <div class="tableWrap">
+          <table id="triesTable">
+            <thead>
+              <tr>
+                <th>#</th><th>단어</th><th>유사도</th><th>공통 키워드</th><th>단서</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer muted">
+      <span>서버: Cloudflare Pages Functions</span><span class="sep">·</span><span>환경변수: <code>OPENDICT_KEY</code></span>
+    </footer>
+  </div>
+
+  <dialog id="howDialog" class="dialog">
+    <h3>게임 방법</h3>
+    <ol>
+      <li>단어를 입력하고 <b>추론</b>을 누르세요.</li>
+      <li><b>유사도(1~100%)</b>와 <b>공통 키워드</b>를 보고 정답의 뜻풀이를 좁혀가면 됩니다.</li>
+      <li><b>시도 횟수</b>와 <b>경과 시간</b>이 자동 기록됩니다(브라우저 재시작해도 유지).</li>
+    </ol>
+    <div class="callout"><b>팁</b>: 점수보다 공통 키워드가 “납득되는지”를 같이 보세요.</div>
+    <div class="row right"><button id="btnCloseHow" class="btn">닫기</button></div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
