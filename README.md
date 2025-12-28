@@ -38,3 +38,4 @@ Deployments → (해당 배포) → Functions 로그에서 에러 확인.
 - OPENDICT_KEY 누락/오타
 - 우리말샘 API 일시 오류/제한
 - 폴더 구조가 `functions/api/*.js`가 아닌 경우
+- redeploy
