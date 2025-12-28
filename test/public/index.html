@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>뜻겹 (우리말샘 기반 · 동적 버전)</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">뜻겹</div>
+        <div class="subtitle">우리말샘(OpenDict) 기반 “설명 가능한” 추론 게임</div>
+      </div>
+      <div class="actions">
+        <button id="btnHow" class="btn ghost">방법</button>
+        <button id="btnNew" class="btn">새 게임</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>입력</h2>
+        <div class="row">
+          <input id="guessInput" type="text" placeholder="단어 입력 (사전에 있는 단어)" autocomplete="off" />
+          <button id="btnGuess" class="btn">추론</button>
+        </div>
+        <div class="muted" id="statusLine">우리말샘에 등록된 단어만 인정됩니다.</div>
+
+        <div class="hintRow">
+          <button id="btnHint1" class="btn ghost">힌트 1</button>
+          <button id="btnHint2" class="btn ghost">힌트 2</button>
+          <button id="btnReveal" class="btn danger ghost">정답 공개</button>
+        </div>
+        <div class="hints" id="hints"></div>
+      </section>
+
+      <section class="card">
+        <h2>점수 규칙 (합리적 추론)</h2>
+        <ul class="bullets">
+          <li><b>의미 점수</b>: 내 단어 뜻풀이 vs 정답 뜻풀이에서 <b>핵심 키워드 겹침</b>으로 계산 (가중치 Jaccard).</li>
+          <li><b>공통 키워드</b>: 두 뜻풀이에서 겹친 단어를 그대로 보여줘요.</li>
+          <li>“왜 점수가 높았는지”가 보여서 <b>논리적으로 좁히기</b>가 쉬워요.</li>
+        </ul>
+        <div class="small muted">※ 동적 버전: 단어/뜻풀이를 매번 우리말샘 API에서 가져옵니다.</div>
+      </section>
+
+      <section class="card wide">
+        <div class="row space">
+          <h2>시도 기록</h2>
+          <div class="muted" id="metaLine"></div>
+        </div>
+        <div class="tableWrap">
+          <table id="triesTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>입력</th>
+                <th>의미점수</th>
+                <th>공통키워드</th>
+                <th>추가단서</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer muted">
+      <span>진행 상황은 로컬 저장(LocalStorage)에 저장됩니다.</span>
+      <span class="sep">·</span>
+      <span>백엔드: Cloudflare Pages Functions(또는 Workers)에서 우리말샘 API를 프록시합니다.</span>
+    </footer>
+  </div>
+
+  <dialog id="howDialog" class="dialog">
+    <h3>게임 방법</h3>
+    <ol>
+      <li>단어를 입력하고 <b>추론</b>을 누르세요.</li>
+      <li>의미점수와 공통키워드를 보고 정답 뜻풀이를 좁혀가세요.</li>
+      <li>힌트는 단계적으로 열립니다.</li>
+    </ol>
+    <p class="muted">정답은 서버에서만 알고 있고, 브라우저에는 내려오지 않습니다.</p>
+    <div class="row right">
+      <button id="btnCloseHow" class="btn">닫기</button>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
