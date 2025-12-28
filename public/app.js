@@ -1,1 +1,0 @@
-fetch('/api/guess?word=사과').then(r=>r.json()).then(console.log)
