@@ -64,4 +64,4 @@ Deployments → (해당 배포) → Functions 로그에서 에러 확인.
    - Variable name: `TTEUTGYOP_KV`
    - KV namespace: 방금 만든 `tteutgyeop-kv`
 
-3) Deploy 다시 하기
+3) Deploy 다시 하기.
