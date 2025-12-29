@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>사잇말</title>
+  <link rel="stylesheet" href="/style.css"/>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="logo">사잇말</div>
+      <div class="sub">우리말샘(OpenDict) 기반 • 하루 1개 정답</div>
+    </div>
+
+    <div class="right">
+      <button class="iconBtn" id="themeBtn" type="button" aria-label="테마 변경">🌙</button>
+      <div class="miniStats">
+        <div class="mini"><span class="k">시도</span><span class="v" id="triesCount">0</span></div>
+        <div class="mini"><span class="k">경과</span><span class="v" id="elapsed">00:00</span></div>
+        <div class="mini"><span class="k">오늘 최고</span><span class="v" id="bestPct">0%</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="pageGrid">
+    <aside class="adRail left" aria-label="광고 영역(좌측)">
+      <div class="adBox">
+        <div class="adLabel">Ad</div>
+        <!-- Google AdSense (좌측) 코드를 여기에 넣으세요 -->
+      </div>
+    </aside>
+    <div class="wrap">
+    <section class="card">
+      <form id="guessForm" class="guessForm" autocomplete="off">
+        <input id="guessInput" class="guessInput" placeholder="단어를 입력하고 Enter (예: 사과)" maxlength="20"/>
+        <button class="btn primary" type="submit">추론</button>
+        <button class="btn" id="newGameBtn" type="button">새 게임</button>
+        <button class="btn danger" id="giveUpBtn" type="button">포기하기</button>
+      </form>
+      <div class="msg" id="msg"></div>
+    </section>
+
+    <section class="card">
+      <div class="cardHead">
+        <h2>입력 누적</h2>
+        <div class="small" id="dateKey">-</div>
+      </div>
+      <div class="list" id="guessList"></div>
+    </section>
+
+    <section class="foot small">
+      <a href="/api/meta" target="_blank" rel="noreferrer">API 상태</a>
+    </section>
+      </div>
+    <aside class="adRail right" aria-label="광고 영역(우측)">
+      <div class="adBox">
+        <div class="adLabel">Ad</div>
+        <!-- Google AdSense (우측) 코드를 여기에 넣으세요 -->
+      </div>
+    </aside>
+  </main>
+
+  <script src="/app.js"></script>
+
+  <div id="howtoModal" class="modal" aria-hidden="true">
+    <div class="modalBackdrop" data-close="1"></div>
+    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="howtoTitle">
+      <div class="modalHead">
+        <div id="howtoTitle" class="modalTitle">게임방법</div>
+        <button class="modalClose" id="howtoClose" aria-label="닫기">✕</button>
+      </div>
+      <div class="modalBody">
+        <ol class="howto">
+          <li><b>단어</b>를 입력하고 <b>Enter</b> 또는 <b>추론</b>을 누르세요.</li>
+          <li>각 입력은 <b>유사도(1~100%)</b>로 점수화되어 목록에 누적됩니다.</li>
+          <li>목록은 <b>유사도가 높은 순</b>으로 자동 정렬돼요. (같으면 최근 입력이 위)</li>
+          <li><b>오늘의 정답은 모두 동일</b>하고, 하루에 1개로 고정됩니다.</li>
+          <li>브라우저를 껐다 켜도 <b>시도/시간/입력 기록</b>은 유지됩니다.</li>
+          <li>정답이 도저히 안 보이면 <b>포기하기</b>를 눌러 확인할 수 있어요.</li>
+        </ol>
+        <div class="howtoTip">
+          팁: 너무 흔한 접속사/조사(예: “그리고”)는 점수가 낮거나 사전에 없을 수 있어요. <b>명사/동사</b> 중심으로 시도하면 좋아요.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
