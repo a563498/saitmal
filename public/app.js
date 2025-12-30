@@ -383,15 +383,9 @@ async function init(){
     } else {
       if (!state.startAt) state.startAt = Date.now();
     }
+    state.bestDB = typeof m.bestDB === 'number' ? m.bestDB : (state.bestDB||0);
+    saveState();
     render();
-    // DB 기준 최고 유사(정답 제외) Top1을 미리 로드해 우측 상단에 표시
-    try{
-      const t = await apiJson('/api/top?limit=1');
-      const it = (t.items||[])[0];
-      state.bestDB = it ? (it.percent||0) : 0;
-      saveState();
-      render();
-    }catch(_e){ /* ignore */ }
   }catch(e){
     setStatus("초기화 실패: " + e.message);
   }

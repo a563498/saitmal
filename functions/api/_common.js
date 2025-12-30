@@ -479,3 +479,117 @@ export function scoreToPercent(score, { isCorrect = false } = {}) {
   if (p > 99) p = 99;
   return p;
 }
+
+// ---- DB Top-N (정답 제외) 캐시 ----
+export async function getDbTop(env, dateKey, { limit = 10 } = {}) {
+  if (!env?.DB) throw new Error("D1 바인딩(DB)이 없어요.");
+  const kv = resolveKV(env);
+  const cacheKey = `saitmal:top10:${dateKey}`;
+
+  // KV cache
+  if (kv) {
+    try {
+      const cached = await kv.get(cacheKey);
+      if (cached) {
+        const v = JSON.parse(cached);
+        if (v?.items?.length) {
+          return { dateKey, answer: v.answer || null, items: v.items.slice(0, limit) };
+        }
+      }
+    } catch {
+      // ignore cache errors
+    }
+  }
+
+  // need answer
+  const ans = await getDailyAnswer(env, dateKey);
+  if (!ans) return { dateKey, answer: null, items: [] };
+
+  // schema detect (entries/senses)
+  async function tableColumns(DB, table) {
+    try {
+      const { results } = await DB.prepare(`PRAGMA table_info(${table});`).all();
+      return new Set((results || []).map(r => String(r.name || "").toLowerCase()));
+    } catch {
+      return new Set();
+    }
+  }
+  function pickCol(cols, names, fallback = null) {
+    for (const n of names) {
+      const k = String(n).toLowerCase();
+      if (cols.has(k)) return n;
+    }
+    return fallback;
+  }
+
+  const eCols = await tableColumns(env.DB, "entries");
+  const sCols = await tableColumns(env.DB, "senses");
+
+  const eId = pickCol(eCols, ["id", "entry_id", "entryid", "eid"], "id");
+  const eWord = pickCol(eCols, ["word", "lemma", "headword", "entry"], "word");
+  const ePos = pickCol(eCols, ["pos", "part_of_speech", "pos_name", "posnm"], null);
+  const eLevel = pickCol(eCols, ["level", "difficulty", "lvl"], null);
+
+  const eDef = pickCol(eCols, ["definition", "def", "mean", "meaning", "definition_text"], null);
+  const eEx = pickCol(eCols, ["example", "ex", "sample", "usage", "example_text"], null);
+
+  const sFk = pickCol(sCols, ["entry_id", "entryid", "eid", "entry", "entries_id"], null);
+  const sDef = pickCol(sCols, ["definition", "def", "mean", "meaning", "sense_definition", "definition_text"], null);
+  const sEx = pickCol(sCols, ["example", "ex", "sample", "usage", "example_text"], null);
+  const sOrd = pickCol(sCols, ["sense_order", "ord", "order", "seq", "no", "idx"], null);
+
+  const senseOrder = sOrd ? `ORDER BY s.${sOrd} ASC, s.rowid ASC` : `ORDER BY s.rowid ASC`;
+  const defExpr = eDef ? `e.${eDef}` : (sFk && sDef ? `(SELECT s.${sDef} FROM senses s WHERE s.${sFk}=e.${eId} ${senseOrder} LIMIT 1)` : "NULL");
+  const exExpr = eEx ? `e.${eEx}` : (sFk && sEx ? `(SELECT s.${sEx} FROM senses s WHERE s.${sFk}=e.${eId} ${senseOrder} LIMIT 1)` : "NULL");
+
+  // candidates: random sample (속도 우선)
+  const SAMPLE = 2000;
+  const sql = `
+    SELECT e.${eId} AS id,
+           e.${eWord} AS word
+           ${ePos ? `, e.${ePos} AS pos` : ", NULL AS pos"}
+           ${eLevel ? `, e.${eLevel} AS level` : ", NULL AS level"}
+           , ${defExpr} AS definition
+           , ${exExpr} AS example
+    FROM entries e
+    ORDER BY RANDOM()
+    LIMIT ${SAMPLE}
+  `;
+  const rows = (await env.DB.prepare(sql).all()).results || [];
+
+  const items = [];
+  for (const r of rows) {
+    const w = normalizeWord(r.word);
+    if (!w || w === normalizeWord(ans.word)) continue;
+
+    const guess = {
+      word: w,
+      pos: r.pos || "",
+      level: r.level || "",
+      definition: r.definition || "",
+      example: r.example || "",
+    };
+
+    const score = similarityScore(guess, ans);
+    const percent = scoreToPercent(score, { isCorrect: false });
+    items.push({ word: w, percent });
+  }
+
+  items.sort((a, b) => (b.percent - a.percent) || a.word.localeCompare(b.word, "ko"));
+  const topAll = items.slice(0, Math.max(10, limit));
+
+  // write cache
+  if (kv) {
+    try {
+      await kv.put(
+        cacheKey,
+        JSON.stringify({ answer: { word: ans.word, pos: ans.pos || "", level: ans.level || "" }, items: topAll }),
+        { expirationTtl: 60 * 60 * 24 * 2 }
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  return { dateKey, answer: { word: ans.word, pos: ans.pos || "", level: ans.level || "" }, items: topAll.slice(0, limit) };
+}
