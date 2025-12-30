@@ -266,8 +266,8 @@ async function apiJson(url, opts){
 function render(){
   $("triesCount").textContent = state.tries || 0;
   $("bestPct").textContent = `${state.best||0}%`;
-  // 정답(100%) 제외 최고 유사도 표시
-  const near = Math.max(0, ...(state.guesses||[]).filter(g=> (g?.percent??0) < 100).map(g=>g.percent||0));
+  // 정답(100%) 제외: DB 기준 최고 유사도(Top1)
+  const near = typeof state.bestDB === "number" ? state.bestDB : 0;
   const bestNearEl = $("bestNear");
   if (bestNearEl) bestNearEl.textContent = `${near||0}%`;
   $("dateKey").textContent = state.dateKey || "-";
@@ -308,11 +308,7 @@ function render(){
 
     const clues = document.createElement("div");
     clues.className = "clues";
-    const c = g.clues || {};
-    if (c.글자수){
-      const t = c.글자수.text || "";
-      clues.appendChild(tag(`글자수: ${t}`));
-    }
+    // clues removed
     el.appendChild(clues);
 
     list.appendChild(el);
@@ -333,11 +329,11 @@ async function openTop(){
   body.textContent = "불러오는 중...";
   modal.setAttribute("aria-hidden","false");
   try{
-    const r = await apiJson("/api/top");
+    const r = await apiJson("/api/top?limit=10");
     const items = r.items || [];
     const ans = r.answer || {};
     const title = $("topTitle");
-    if (title) title.textContent = `TOP 100 · 정답: ${ans.word||""}`;
+    if (title) title.textContent = `TOP 10 · 정답: ${ans.word||""}`;
     const wrap = document.createElement("div");
     wrap.className = "topList";
     if (!items.length){
@@ -423,6 +419,7 @@ function bindHowtoModal(){
 }
 
 async function submit(){
+  if (state.gameOver){ setStatus('오늘 게임은 종료되었어요. 내일 다시 도전해 주세요!'); return; }
   const inp = $("guessInput");
   if (!inp) return;
   const word = inp.value.trim();

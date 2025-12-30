@@ -5,16 +5,18 @@ async function tableColumns(DB, table){
   return new Set((results||[]).map(r=>String(r.name||"").toLowerCase()));
 }
 
-export async function onRequestGet({ env }){
+export async function onRequestGet({ env, request }){
   try{
     if (!env.DB) return json({ ok:false, message:"D1 바인딩(DB)이 없어요." }, 500);
 
+    const url = new URL(request.url);
+    const reqLimit = Math.max(1, Math.min(50, parseInt(url.searchParams.get('limit')||'10',10)));
     const dateKey = seoulDateKey();
     const ans = await getDailyAnswer(env, dateKey);
     if (!ans) return json({ ok:false, message:"정답 생성 실패" }, 500);
 
     const kv = resolveKV(env);
-    const cacheKey = `top100:${dateKey}`;
+    const cacheKey = `top10:${dateKey}`;
     if (kv){
       const cached = await kv.get(cacheKey);
       if (cached){
@@ -22,7 +24,7 @@ export async function onRequestGet({ env }){
       }
     }
 
-    // Build top100 (best-effort).
+    // Build top10 (best-effort).
     // 1) tokens/rel_tokens 컬럼이 있으면 전체 스캔(상대적으로 빠름)
     // 2) 없으면 FTS(있으면)로 후보군을 줄여서 계산
     const cols = await tableColumns(env.DB, "entries");
@@ -82,11 +84,11 @@ export async function onRequestGet({ env }){
     }
 
     items.sort((a,b)=> (b.percent-a.percent) || (a.word.localeCompare(b.word)));
-    const top = items.slice(0, 100);
+    const topAll = items.slice(0, 10);
 
-    if (kv) await kv.put(cacheKey, JSON.stringify(top), { expirationTtl: 60 * 60 * 24 * 2 });
+    if (kv) await kv.put(cacheKey, JSON.stringify(topAll), { expirationTtl: 60 * 60 * 24 * 2 });
 
-    return json({ ok:true, dateKey, answer:{ word: ans.word, pos: ans.pos||null, level: ans.level||null }, items: top });
+    return json({ ok:true, dateKey, answer:{ word: ans.word, pos: ans.pos||null, level: ans.level||null }, items: topAll.slice(0, reqLimit) });
   }catch(e){
     return json({ ok:false, message:"top 오류", detail:String(e && e.stack ? e.stack : e) }, 500);
   }

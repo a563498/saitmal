@@ -1,46 +1,125 @@
-# 사잇말 (한국어기초사전 DB 버전)
+# 사잇말 (SAITMAL)
 
-우리말샘(OpenDict) API 의존을 없애고, **한국어기초사전 전체 내려받기(JSON)** 데이터를 로컬에서 DB로 만든 뒤
-Cloudflare **D1**(SQLite)로 올려서 게임 서버가 DB만 조회하도록 만든 버전입니다.
+**사잇말**은 한국어 단어를 입력하면 “정답 단어”와의 **유사도(0~100%)** 를 보여주는 **하루 1개 정답 단어 추론 게임**입니다.  
+정답을 바로 맞히는 것보다, 의미적으로 가까운 단어를 찾아가며 ‘사잇말(중간 단어)’을 좁혀가는 재미를 목표로 합니다.
 
-## 1) DB 만들기(로컬 1회)
-1. 업로드해둔 전체 내려받기 ZIP을 `data/`에 두거나, 파일 경로를 지정합니다.
-2. 아래 스크립트로 `dict.db`(SQLite)와 `dict.sql`(덤프)를 만듭니다.
+---
 
-```bash
-python tools/build_db.py --input "전체 내려받기_한국어기초사전_json_20251219.zip" --out tools/dict.db
-python tools/dump_sql.py --db tools/dict.db --out tools/dict.sql
-```
+## 1) 프로젝트 구성
 
-## 2) Cloudflare D1 생성/업로드(추천: CLI)
-> UI에서도 가능하지만, 대용량은 CLI(wrangler)가 가장 안정적입니다.
+- **Hosting**: Cloudflare Pages  
+- **Backend**: Cloudflare Pages Functions (Workers 런타임)
+- **DB**: Cloudflare D1 (`DB` 바인딩)
+- **KV**: Cloudflare KV (`SAITMAL_KV` 권장, 하이픈 네임스페이스도 자동 인식)
+
+### Cloudflare 바인딩 (권장)
+- D1 Database
+  - **Binding name**: `DB`
+- KV Namespace
+  - **Binding name**: `SAITMAL_KV`
+  - (레거시/대안으로 `TTEUTGYOP_KV`, `saitmal-kv` 등도 코드에서 자동 인식)
+
+---
+
+## 2) 데이터 (절대 기준)
+
+사전 데이터는 **국립국어원 ‘한국어기초사전’** 기반이며, 프로젝트의 모든 단어/정의는 이 DB를 **베이스로만** 사용합니다.  
+(이 원칙은 변하지 않습니다.)
+
+- 적재 흐름: JSON → SQLite → D1
+- 테이블(예시):
+  - `entries` (단어/품사/정의 요약/토큰 등)
+  - `senses` (의미/정의/용례 등)
+
+---
+
+## 3) API
+
+### `GET /api/meta`
+오늘의 정답(길이 등 메타 정보)을 제공합니다.
+
+### `GET /api/guess?word=...`
+입력 단어의 유사도 결과를 반환합니다.
+
+### `GET /api/giveup`
+포기 처리(정답 공개 + 게임 종료 처리)
+
+### `GET /api/top?limit=10`
+정답과 가장 유사도가 높은 단어 목록(정답 제외)을 **DB 전체에서** 추려 반환합니다.  
+- `limit` 기본값 10, 최대 50  
+- KV 캐시(`top10:YYYY-MM-DD`)로 하루 단위 재사용
+
+---
+
+## 4) 유사도(Score) 설계 개요
+
+현재 유사도는 “사전 정의 기반 토큰”과 “연관 토큰(rel_tokens)”을 활용한 **휴리스틱 점수**로 계산합니다.
+
+- 정의/용례에서 한글 토큰을 추출
+- 불용어(너무 흔한 기능어) 제거
+- 표기/동의 치환(예: 금년→올해, 명년→내년 등 일부 규칙) 후
+- 토큰 유사도(Jaccard 계열) + 보정 규칙으로 점수화
+- `scoreToPercent()` 로 0~100%로 변환
+
+> 목표는 “사람이 납득 가능한 유사도”에 가깝게 지속 개선하는 것입니다.
+
+---
+
+## 5) 로컬 개발
+
+Cloudflare Pages/Functions 형태이므로 Wrangler 기반으로 실행합니다(환경에 맞게 조정).
 
 ```bash
 npm i -g wrangler
-wrangler login
-
-# D1 생성
-wrangler d1 create tteutgyeop-db
-
-# schema 적용
-wrangler d1 execute tteutgyeop-db --file=tools/schema.sql
-
-# 데이터 업로드 (덤프)
-wrangler d1 execute tteutgyeop-db --file=tools/dict.sql
+wrangler dev
 ```
 
-## 3) Pages 프로젝트 바인딩
-Cloudflare Dashboard → Workers & Pages → (프로젝트) → Settings → Bindings
-- **D1 database** 추가
-  - Variable name: `DB`
-  - Database: `tteutgyeop-db`
+D1/KV는 로컬 바인딩 구성 또는 Cloudflare 대시보드 연결이 필요합니다.
 
-## 4) 배포
-GitHub에 올리고 Pages 연결하면 됩니다.
-- Build command: 없음
-- Build output: `public`
-- Functions: `/functions`
+---
 
-## 5) 법적/표기
-한국어기초사전 콘텐츠는 사이트의 **저작권정책/라이선스**를 확인하고, 화면 하단에
-출처/라이선스(CC BY-SA 등) 문구를 표시하세요.
+## 6) 버전 히스토리 (변경 기록)
+
+> 아래는 이 대화에서 **문제 해결을 위해 실제로 반영된 변경 흐름**을 중심으로 정리한 기록입니다.
+
+### v9 (안정화 기준점)
+- 프론트에서 **모든 버튼/입력 이벤트가 먹지 않던 문제**를 해결
+  - `submit`/`click`/`keydown(Enter)` 이벤트 바인딩 정리
+  - `preventDefault()` 적용
+- `/api/meta`, `/api/guess` 정상 동작 확인
+
+### v10 (게임 화면 단순화 1차)
+- 난이도/품사 등 “추론에 크게 도움이 되지 않는 힌트”를 UI 표시에서 제거
+- 진행 UI와 상태 저장(로컬 스토리지) 안정화
+
+### v11 (UX/기능 확장)
+- 입력 누적(히스토리) 로직 개선
+  - 중복 단어는 **리스트에 1번만** 표시(시도 횟수는 계속 증가)
+  - 최근 입력 단어를 상단에 **핀(pinned)** 처리
+- 정답을 맞추거나 포기했을 때 **TOP 목록(서버 계산)** 표시 기능 추가
+- KV 바인딩 이름 이슈(네임스페이스 변경/하이픈 키) 대응 로직 정리
+
+### v12 (성능/운영 방향 반영)
+- TOP100 → **TOP10** 으로 축소 (속도/부담 감소)
+- 포기/정답 이후에는 **추가 추론 입력 불가**(게임 종료 잠금)
+- TOP 계산 결과를 KV에 캐시하여 반복 호출 비용 감소
+
+### v13 (현재 배포본)
+- “정답(100%) 제외, DB에서 가장 유사한 단어의 %” 를 상단에 표시
+  - 사용자가 입력한 최고 유사도(오늘 최고)와는 별개로 **DB 기준 최고 유사도**를 보여줌
+- `TOP` API에 `limit` 지원 (`/api/top?limit=1|10|...`)
+- 입력 누적에서 **글자수 힌트 표시 제거** (완전 단순화)
+
+---
+
+## 7) 운영 메모
+
+- 정답/일자 기반 데이터는 KV 키로 캐시합니다.
+- 사전 DB 업데이트는 비정기/수동으로 진행하며, 게임 로직만 지속 개선합니다.
+
+---
+
+## 8) 라이선스 / 데이터 출처
+
+- 데이터 출처: 국립국어원 **한국어기초사전**
+- 프로젝트의 DB는 해당 출처를 기반으로 구성됩니다.
