@@ -23,7 +23,8 @@ export async function onRequestGet({ request, env }){
     const top = await getDbTop(env, dateKey, { limit: 1 });
     const maxRaw = top?.maxRaw || 0;
     const percent = scoreToPercentScaled(score, maxRaw, { isCorrect });
-    return json({ ok:true, data:{ word: g.word, percent, isCorrect } });
+    const rank = isCorrect ? 1 : (top?.map && top.map[g.word] ? (top.map[g.word].rank || null) : null);
+    return json({ ok:true, data:{ word: g.word, percent, rank, isCorrect } });
   }catch(e){
     return json({ ok:false, message:"guess 오류", detail:String(e && e.stack ? e.stack : e) }, 500);
   }

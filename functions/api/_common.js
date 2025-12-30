@@ -26,11 +26,7 @@ function hash32(str) {
 const HANGUL_SEQ = /[가-힣]+/g;
 
 // 너무 흔한 기능어/보조용언(정의/예문 토큰화에서 제거)
-const STOP = new Set(
-  "그리고 그래서 하지만 그러나 또는 및 등 것을 있다 없다 하다 되다 하게 하기 했다 했다 대한 대한것 이다 이며 이고".split(
-    " "
-  )
-);
+const STOP = new Set(["그리고", "그래서", "하지만", "그러나", "또는", "및", "등", "것", "것들", "사람", "사람들", "경우", "때문", "위해", "대한", "관련", "있다", "없다", "하다", "되다", "하게", "하기", "했다", "했다", "한다", "된다", "이다", "이며", "이고", "이다며", "한다며", "그것", "이것", "저것", "여기", "저기", "거기", "어떤", "이러한", "그런", "저런", "같은", "말", "일", "것임", "정도", "수", "등등", "때", "동안", "사이", "이후", "이전", "전후", "모두", "모든", "각", "여러", "여러가지", "사용", "쓰다", "쓰이다", "이용", "대하다", "관한", "포함", "및또", "또한", "더", "더욱", "매우", "정말"]);
 
 // 한 글자라도 의미가 큰 토큰(연/월/일/년/해 등)
 const SINGLE_KEEP = new Set(["년", "해", "월", "일", "봄", "여름", "가을", "겨울"]);
@@ -110,6 +106,15 @@ const CONCEPT = new Map([
   ["올해","연도"],["금년","연도"],["다음해","연도"],["내년","연도"],["다다음해","연도"],["내후년","연도"],["작년","연도"],["전년","연도"],
 ]);
 
+
+// 매우 빈번한 토큰(정의 어디에나 나와서 유사도를 망치는 것들)
+// - STOP과 별개로 "의미 판별"에서만 추가로 제외
+const COMMON = new Set([
+  "사람","가축","동물","식물","것","일","말","수","때","곳","모양","상태","방법","경우",
+  "사용","쓰다","쓰이다","이용","하여","해서","하며","한다","되는","된다","이다",
+  "어떤","이러한","그런","같은","정도","모두","모든","여러","가능","불가능",
+  "하다","되다","있다","없다","위해","대한","관련","포함","가리키다","뜻하다"
+]);
 // CONCEPT 값(개념 토큰) 집합: '짧은시간' 같은 개념 겹침을 강하게 보상하기 위함
 const CONCEPT_VALUES = new Set(Array.from(new Set(Array.from(CONCEPT.values()))));
 
@@ -447,6 +452,14 @@ function overlapCoeff(a, b) {
   return denom ? inter / denom : 0;
 }
 
+
+function informativeIntersection(aTokens, bTokens) {
+  const a = new Set((aTokens||[]).filter(t=>t && t.length>=2 && !STOP.has(t) && !COMMON.has(t) && !CONCEPT_VALUES.has(t)));
+  const b = new Set((bTokens||[]).filter(t=>t && t.length>=2 && !STOP.has(t) && !COMMON.has(t) && !CONCEPT_VALUES.has(t)));
+  let n=0;
+  for (const t of a) if (b.has(t)) n++;
+  return n;
+}
 export function similarityScore(guess, answer) {
   // 표제어가 같으면 거의 동일
   const gw = normToken(guess?.word);
@@ -492,15 +505,23 @@ export function similarityScore(guess, answer) {
   let posPenalty = 1;
   const gp = (guess?.pos || "").trim();
   const ap = (answer?.pos || "").trim();
-  if (gp && ap && gp !== ap) posPenalty = 0.7;
+  if (gp && ap && gp !== ap) posPenalty = 0.55;
 
   // 가중치(휴리스틱): 사람 기준 '연상되는 단어' 비중을 높임
   // - 정의/예문/컨셉 토큰 중심
   // - 표제어 철자 유사도는 보조
+
+  // '의미 없는 공통어(사람/것/하다...)' 겹침으로 점수가 튀는 것을 억제
+  const sharedInfo = informativeIntersection([...gDef, ...gRel], [...aDef, ...aRel]);
+  // 유의미한 공통 토큰이 거의 없으면(=연관성이 약함) 정의/예문 기반 점수를 상한 처리
+  const defCap = sharedInfo >= 2 ? 1 : 0.18;
+  const relCap = sharedInfo >= 2 ? 1 : 0.18;
+  const sDef2 = Math.min(sDef, defCap);
+  const sRel2 = Math.min(sRel, relCap);
   const score = posPenalty * (
     0.35 * sConcept +
-    0.35 * sDef +
-    0.20 * sRel +
+    0.35 * sDef2 +
+    0.20 * sRel2 +
     0.10 * sWTok
   );
 
@@ -538,12 +559,16 @@ export function scoreToPercentScaled(score, maxRaw, { isCorrect = false } = {}) 
 }
 
 // ---- DB Top-N (정답 제외) 캐시 ----
+
+// ---- DB Top cache (정답 제외) ----
+// - 한 날짜에 1회 계산하고 KV에 저장
+// - guess/meta/top에서 공통 사용
 export async function getDbTop(env, dateKey, { limit = 10 } = {}) {
   if (!env?.DB) throw new Error("D1 바인딩(DB)이 없어요.");
   const kv = resolveKV(env);
-  const cacheKey = `saitmal:top10:${dateKey}`;
+  const cacheKey = `saitmal:topcache:${dateKey}`;
 
-  // KV cache
+  // 1) KV cache
   if (kv) {
     try {
       const cached = await kv.get(cacheKey);
@@ -553,39 +578,23 @@ export async function getDbTop(env, dateKey, { limit = 10 } = {}) {
           return {
             dateKey,
             answer: v.answer || null,
+            maxRaw: v.maxRaw || 0,
             items: v.items.slice(0, limit),
-            maxRaw: typeof v.maxRaw === "number" ? v.maxRaw : 0,
+            map: v.map || null,
           };
         }
       }
     } catch {
-      // ignore cache errors
+      // ignore
     }
   }
 
-  // need answer
+  // 2) build cache
   const ans = await getDailyAnswer(env, dateKey);
-  if (!ans) return { dateKey, answer: null, items: [] };
+  if (!ans) return { dateKey, answer: null, items: [], maxRaw: 0, map: null };
 
-  // schema detect (entries/senses)
-  async function tableColumns(DB, table) {
-    try {
-      const { results } = await DB.prepare(`PRAGMA table_info(${table});`).all();
-      return new Set((results || []).map(r => String(r.name || "").toLowerCase()));
-    } catch {
-      return new Set();
-    }
-  }
-  function pickCol(cols, names, fallback = null) {
-    for (const n of names) {
-      const k = String(n).toLowerCase();
-      if (cols.has(k)) return n;
-    }
-    return fallback;
-  }
-
-  const eCols = await tableColumns(env.DB, "entries");
-  const sCols = await tableColumns(env.DB, "senses");
+  const eCols = await entriesColumns(env.DB);
+  const sCols = await sensesColumns(env.DB);
 
   const eId = pickCol(eCols, ["id", "entry_id", "entryid", "eid"], "id");
   const eWord = pickCol(eCols, ["word", "lemma", "headword", "entry"], "word");
@@ -602,77 +611,41 @@ export async function getDbTop(env, dateKey, { limit = 10 } = {}) {
 
   const senseOrder = sOrd ? `ORDER BY s.${sOrd} ASC, s.rowid ASC` : `ORDER BY s.rowid ASC`;
   const defExpr = eDef ? `e.${eDef}` : (sFk && sDef ? `(SELECT s.${sDef} FROM senses s WHERE s.${sFk}=e.${eId} ${senseOrder} LIMIT 1)` : "NULL");
-  const exExpr = eEx ? `e.${eEx}` : (sFk && sEx ? `(SELECT s.${sEx} FROM senses s WHERE s.${sFk}=e.${eId} ${senseOrder} LIMIT 1)` : "NULL");
+  const exExpr  = eEx  ? `e.${eEx}`  : (sFk && sEx  ? `(SELECT s.${sEx}  FROM senses s WHERE s.${sFk}=e.${eId} ${senseOrder} LIMIT 1)` : "NULL");
 
-  // 후보군을 '정답 정의/예문' 기반으로 좁혀서(=의미적으로 가까운 단어가 있을 법한 곳) 정확도↑
-  const aTokens = Array.from(new Set(tokenize((ans.definition || "") + " " + (ans.example || ""))))
-    .filter(t => t && t.length >= 2 && t !== ans.word)
-    .slice(0, 6);
-
-  let rows = [];
-  try {
-    const params = [];
-    const whereParts = [];
-
-    // senses 테이블이 있으면 senses 정의에서 검색(정확도↑)
-    if (sFk && sDef) {
-      for (const t of aTokens) {
-        whereParts.push(`s.${sDef} LIKE ?`);
-        params.push(`%${t}%`);
-      }
-      // 토큰이 너무 적으면 fallback로 표제어 기반 후보도 조금 추가
-      if (!whereParts.length) {
-        whereParts.push(`e.${eWord} LIKE ?`);
-        params.push(`%${ans.word.slice(0, 1)}%`);
-      }
-
-      let extra = "";
-      if (ePos && (ans.pos || "").trim()) {
-        extra = ` AND e.${ePos} = ?`;
-        params.push((ans.pos || "").trim());
-      }
-
-      const sql = `
-        SELECT e.${eId} AS id,
-               e.${eWord} AS word
-               ${ePos ? `, e.${ePos} AS pos` : ", NULL AS pos"}
-               ${eLevel ? `, e.${eLevel} AS level` : ", NULL AS level"}
-               , s.${sDef} AS definition
-               ${sEx ? `, s.${sEx} AS example` : ", '' AS example"}
-        FROM entries e
-        JOIN senses s ON s.${sFk} = e.${eId}
-        WHERE (${whereParts.join(" OR ")})${extra}
-        GROUP BY e.${eId}
-        LIMIT 1500
-      `;
-      rows = (await env.DB.prepare(sql).bind(...params).all()).results || [];
-    } else {
-      // senses가 없으면 entries.definition에서 검색
-      for (const t of aTokens) {
-        whereParts.push(`${defExpr} LIKE ?`);
-        params.push(`%${t}%`);
-      }
-      const sql = `
-        SELECT e.${eId} AS id,
-               e.${eWord} AS word
-               ${ePos ? `, e.${ePos} AS pos` : ", NULL AS pos"}
-               ${eLevel ? `, e.${eLevel} AS level` : ", NULL AS level"}
-               , ${defExpr} AS definition
-               , ${exExpr} AS example
-        FROM entries e
-        WHERE (${whereParts.length ? whereParts.join(" OR ") : "1=1"})
-        LIMIT 1500
-      `;
-      rows = (await env.DB.prepare(sql).bind(...params).all()).results || [];
+  // 2-1) 개념(컨셉) 기반 seed 단어(정답과 "같은 의미군"으로 묶인 단어들)
+  const conceptKey = CONCEPT.get(ans.word) || null;
+  const seeds = [];
+  if (conceptKey) {
+    for (const [k,v] of CONCEPT.entries()){
+      if (v === conceptKey && k !== ans.word) seeds.push(k);
     }
-  } catch {
-    rows = [];
   }
 
-  // 후보가 너무 적으면(희귀 정의) 랜덤 샘플로 보강
-  if ((rows?.length || 0) < 250) {
-    const SAMPLE = 2500;
-    const sql2 = `
+  // 2-2) 정의/예문에서 '정보성 높은 토큰'만 추출(공통어/STOP 제거)
+  const aTokensAll = Array.from(new Set(tokenize((ans.definition || "") + " " + (ans.example || ""))))
+    .map(t => normToken(t))
+    .filter(t => t && t.length >= 2 && t !== ans.word && !STOP.has(t) && !COMMON.has(t))
+    .slice(0, 6);
+
+  const rows = [];
+  const seenId = new Set();
+
+  async function pushRows(res){
+    for (const r of (res?.results || [])) {
+      if (r?.id == null) continue;
+      const id = Number(r.id);
+      if (seenId.has(id)) continue;
+      seenId.add(id);
+      rows.push(r);
+    }
+  }
+
+  // (A) seed 단어: word IN (...)
+  if (seeds.length) {
+    const inList = seeds.slice(0, 40);
+    const qs = inList.map(()=>"?").join(",");
+    const sql = `
       SELECT e.${eId} AS id,
              e.${eWord} AS word
              ${ePos ? `, e.${ePos} AS pos` : ", NULL AS pos"}
@@ -680,57 +653,112 @@ export async function getDbTop(env, dateKey, { limit = 10 } = {}) {
              , ${defExpr} AS definition
              , ${exExpr} AS example
       FROM entries e
-      ORDER BY RANDOM()
-      LIMIT ${SAMPLE}
+      WHERE e.${eWord} IN (${qs})
     `;
-    const more = (await env.DB.prepare(sql2).all()).results || [];
-    rows = rows.concat(more);
+    await pushRows(await env.DB.prepare(sql).bind(...inList).all());
   }
 
+  // (B) 정의/예문 LIKE 검색(너무 공통적인 토큰은 제외)
+  if (aTokensAll.length && sFk && sDef) {
+    const where = aTokensAll.map(()=>`s.${sDef} LIKE ?`).join(" OR ");
+    const params = aTokensAll.map(t=>`%${t}%`);
+    const sql = `
+      SELECT DISTINCT e.${eId} AS id,
+             e.${eWord} AS word
+             ${ePos ? `, e.${ePos} AS pos` : ", NULL AS pos"}
+             ${eLevel ? `, e.${eLevel} AS level` : ", NULL AS level"}
+             , ${defExpr} AS definition
+             , ${exExpr} AS example
+      FROM senses s
+      JOIN entries e ON e.${eId}=s.${sFk}
+      WHERE (${where})
+      LIMIT 6000
+    `;
+    await pushRows(await env.DB.prepare(sql).bind(...params).all());
+  } else if (aTokensAll.length && eDef) {
+    const where = aTokensAll.map(()=>`e.${eDef} LIKE ?`).join(" OR ");
+    const params = aTokensAll.map(t=>`%${t}%`);
+    const sql = `
+      SELECT e.${eId} AS id,
+             e.${eWord} AS word
+             ${ePos ? `, e.${ePos} AS pos` : ", NULL AS pos"}
+             ${eLevel ? `, e.${eLevel} AS level` : ", NULL AS level"}
+             , ${defExpr} AS definition
+             , ${exExpr} AS example
+      FROM entries e
+      WHERE (${where})
+      LIMIT 6000
+    `;
+    await pushRows(await env.DB.prepare(sql).bind(...params).all());
+  }
+
+  // (C) 보강 샘플(희귀 정의 / seed 없음 대비)
+  if (rows.length < 3000) {
+    const need = Math.max(0, 5000 - rows.length);
+    if (need > 0) {
+      const sql2 = `
+        SELECT e.${eId} AS id,
+               e.${eWord} AS word
+               ${ePos ? `, e.${ePos} AS pos` : ", NULL AS pos"}
+               ${eLevel ? `, e.${eLevel} AS level` : ", NULL AS level"}
+               , ${defExpr} AS definition
+               , ${exExpr} AS example
+        FROM entries e
+        ORDER BY RANDOM()
+        LIMIT ${need}
+      `;
+      await pushRows(await env.DB.prepare(sql2).all());
+    }
+  }
+
+  // 2-3) score all candidates
   const scored = [];
   for (const r of rows) {
-    const w = normalizeWord(r.word);
-    if (!w || w === normalizeWord(ans.word)) continue;
-
-    const guess = {
+    const w = (r.word || "").trim();
+    if (!w || w === ans.word) continue;
+    const g = {
       word: w,
-      pos: r.pos || "",
-      level: r.level || "",
+      pos: r.pos || null,
+      level: r.level || null,
       definition: r.definition || "",
       example: r.example || "",
     };
-
-    const score = similarityScore(guess, ans);
-    if (score <= 0) continue;
-    scored.push({ word: w, score });
+    const raw = similarityScore(g, ans);
+    if (raw <= 0) continue;
+    scored.push({ word: w, raw });
   }
 
-  // 최고 raw score로 상대 스케일링(최고 후보가 99%가 되도록)
-  let maxRaw = 0;
-  for (const it of scored) if (it.score > maxRaw) maxRaw = it.score;
-  const items = scored
-    .map(it => ({ word: it.word, percent: scoreToPercentScaled(it.score, maxRaw, { isCorrect: false }) }))
-    .sort((a, b) => (b.percent - a.percent) || a.word.localeCompare(b.word, "ko"));
+  scored.sort((a,b)=>b.raw-a.raw);
+  const maxRaw = scored.length ? scored[0].raw : 0;
 
-  const topAll = items.slice(0, Math.max(10, limit));
+  // 상위 1000개 저장(랭크/빠른 조회용)
+  const topN = scored.slice(0, 1000).map((x,i)=>({
+    rank: i+1,
+    word: x.word,
+    raw: x.raw,
+    percent: scoreToPercentScaled(x.raw, maxRaw, { isCorrect:false }),
+  }));
 
-  // write cache
+  // word -> rank/percent 맵
+  const map = {};
+  for (const it of topN) {
+    map[it.word] = { rank: it.rank, percent: it.percent, raw: it.raw };
+  }
+
+  const payload = {
+    answer: { word: ans.word, pos: ans.pos || null, level: ans.level || null },
+    maxRaw,
+    items: topN,
+    map,
+  };
+
   if (kv) {
     try {
-      await kv.put(
-        cacheKey,
-        JSON.stringify({ answer: { word: ans.word, pos: ans.pos || "", level: ans.level || "" }, maxRaw, items: topAll }),
-        { expirationTtl: 60 * 60 * 24 * 2 }
-      );
+      await kv.put(cacheKey, JSON.stringify(payload), { expirationTtl: 60*60*48 });
     } catch {
       // ignore
     }
   }
 
-  return {
-    dateKey,
-    answer: { word: ans.word, pos: ans.pos || "", level: ans.level || "" },
-    maxRaw,
-    items: topAll.slice(0, limit),
-  };
+  return { dateKey, answer: payload.answer, maxRaw, items: topN.slice(0, limit), map };
 }

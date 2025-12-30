@@ -298,7 +298,7 @@ function render(){
     top.className = "itemTop";
 
     const left = document.createElement("div");
-    left.innerHTML = `<div class="word">${escapeHtml(g.word)}</div>`;
+    left.innerHTML = `<div class="word">${g.rank?`<span class="badge">#${g.rank}</span>`:""}${escapeHtml(g.word)}</div>`;
 
     const right = document.createElement("div");
     right.className = "sim";
@@ -446,9 +446,10 @@ if (existing){
   // 중복 단어는 리스트에 1번만: 더 높은 %는 보존, 최근 추론은 맨 위로 올라오게 ts 갱신
   existing.percent = Math.max(existing.percent||0, percent);
   existing.clues = d.clues;
+  existing.rank = (typeof d.rank === 'number' ? d.rank : existing.rank);
   existing.ts = now;
 } else {
-  state.guesses.push({ word: d.word, percent, clues: d.clues, ts: now });
+  state.guesses.push({ word: d.word, percent, rank: (typeof d.rank==='number'?d.rank:null), clues: d.clues, ts: now });
 }
 saveState();
 render();
