@@ -152,6 +152,7 @@ function bigramCounts(s){
 
 function tokenize(text) {
   text = text || "";
+  HANGUL_SEQ.lastIndex = 0;
   const out = [];
   let m;
   while ((m = HANGUL_SEQ.exec(text)) !== null) {
