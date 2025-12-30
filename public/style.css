@@ -308,3 +308,16 @@ header .iconBtn,
 .topRow .rk{ width:42px; opacity:.7; font-variant-numeric: tabular-nums; }
 .topRow .w{ flex:1; font-weight:700; }
 .topRow .p{ width:64px; text-align:right; font-variant-numeric: tabular-nums; }
+
+
+/* Responsive stat labels */
+.kLong{display:inline}
+.kShort{display:none}
+@media (max-width:520px){
+  .kLong{display:none}
+  .kShort{display:inline}
+}
+
+/* Mobile keyboard: keep recent guesses visible */
+:root{ --vvh: 100vh; --listH: auto; }
+#guessList{max-height: var(--listH); overflow:auto; overscroll-behavior: contain; }

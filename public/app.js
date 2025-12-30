@@ -19,6 +19,7 @@ function drawSnow(){
   const w = fxCanvas.width, h = fxCanvas.height;
   if (!snowState) snowState = makeSnowState();
   fxCtx.clearRect(0,0,w,h);
+  fxCtx.fillStyle = "#ffffff";
   for (const f of snowState.flakes){
     f.y += f.v;
     f.x += f.d;
@@ -48,6 +49,7 @@ let sparkleState=null;
 function drawSparkles(){
   if (!fxCtx) return;
   const w = fxCanvas.width, h = fxCanvas.height;
+  fxCtx.fillStyle = "#ffffff";
   if (!sparkleState) sparkleState = makeSparkleState();
   fxCtx.clearRect(0,0,w,h);
   for (const s of sparkleState.p){
@@ -477,4 +479,25 @@ async function giveUp(){
   }
 }
 
-document.addEventListener("DOMContentLoaded", init);
+// Mobile keyboard/layout helper (keeps guess list visible above on-screen keyboard)
+function updateViewportLayout(){
+  try{
+    const vv = window.visualViewport;
+    const vvh = vv ? vv.height : window.innerHeight;
+    document.documentElement.style.setProperty("--vvh", vvh + "px");
+    const header = document.querySelector("header");
+    const play = document.getElementById("playCard");
+    const list = document.getElementById("guessList");
+    if (!list) return;
+    const hH = header ? header.getBoundingClientRect().height : 0;
+    const pH = play ? play.getBoundingClientRect().height : 0;
+    const pad = 34; // spacing
+    const avail = Math.max(160, vvh - hH - pH - pad);
+    document.documentElement.style.setProperty("--listH", avail + "px");
+  }catch(e){}
+}
+
+document.addEventListener("DOMContentLoaded", ()=>{ init(); updateViewportLayout(); });
+window.addEventListener("resize", updateViewportLayout, {passive:true});
+(window.visualViewport&&window.visualViewport.addEventListener("resize", updateViewportLayout, {passive:true}));
+(window.visualViewport&&window.visualViewport.addEventListener("scroll", updateViewportLayout, {passive:true}));

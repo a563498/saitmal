@@ -17,10 +17,10 @@
       <button class="iconBtn" id="themeBtn" type="button" aria-label="테마 변경">🌙</button>
       <button id="animBtn" class="pill" title="애니메이션 켜기/끄기" type="button"><span id="animIcon">✨</span></button>
       <div class="miniStats">
-        <div class="mini"><span class="k">최고 유사</span><span class="v" id="bestNear">0%</span></div>
+        <div class="mini"><span class="k" title="정답과 가장 가까운 유사도"><span class="kLong">정답 근접도</span><span class="kShort">정답 근접</span></span><span class="v" id="bestNear">0%</span></div>
         <div class="mini"><span class="k">시도</span><span class="v" id="triesCount">0</span></div>
         <div class="mini"><span class="k">경과</span><span class="v" id="elapsed">00:00</span></div>
-        <div class="mini"><span class="k">오늘 최고</span><span class="v" id="bestPct">0%</span></div>
+        <div class="mini"><span class="k" title="내가 추측한 단어 중 최고 유사도"><span class="kLong">내 최고 유사도</span><span class="kShort">내 최고</span></span><span class="v" id="bestPct">0%</span></div>
       </div>
     </div>
   </header>
@@ -33,7 +33,7 @@
       </div>
     </aside>
     <div class="wrap">
-    <section class="card">
+    <section class="card" id="playCard">
       <form id="guessForm" class="guessForm" autocomplete="off">
         <input id="guessInput" class="guessInput" placeholder="단어를 입력하고 Enter (예: 사과)" maxlength="20"/>
         <button class="btn primary" type="submit" id="submitBtn">추론</button>
@@ -44,9 +44,9 @@
       <div class="msg" id="msg"></div>
     </section>
 
-    <section class="card">
+    <section class="card" id="guessCard">
       <div class="cardHead">
-        <h2>입력 누적</h2>
+        <h2>추측한 단어</h2>
         <div class="small" id="dateKey">-</div>
       </div>
       <div class="list" id="guessList"></div>
