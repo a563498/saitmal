@@ -345,7 +345,11 @@ async function init(){
 
   // Submit handlers
   $("submitBtn")?.addEventListener("click", submit);
-  $("guessInput")?.addEventListener("keydown", (e)=>{ if (e.key==="Enter") submit(); });
+
+  // form submit(Enter) 기본 동작(페이지 새로고침) 방지
+  const form = document.querySelector("form");
+  form?.addEventListener("submit", (e) => { e.preventDefault(); submit(); });
+$("guessInput")?.addEventListener("keydown", (e)=>{ if (e.key==="Enter") submit(); });
   $("giveupBtn")?.addEventListener("click", giveUp);
 
   // Start seasonal fx

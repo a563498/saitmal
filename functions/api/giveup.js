@@ -1,20 +1,11 @@
-// functions/api/giveup.js
-import { json, ensureTodayAnswer } from "./_common.js";
-
-export async function onRequestGet({ env }) {
-  try {
-    const { dateKey, answer } = await ensureTodayAnswer(env);
-    return json({
-      ok: true,
-      dateKey,
-      answer: {
-        word: answer.word,
-        pos: answer.pos || "불명",
-        level: answer.level || "없음",
-        definition: answer.definition || null,
-      },
-    });
-  } catch (e) {
-    return json({ ok: false, message: `giveup 실패: ${e?.message || e}` }, 500);
+import { json, seoulDateKey, pickDailyAnswer } from './_common.js';
+export async function onRequestPost({ env }){
+  try{
+    if (!env.DB) return json({ ok:false, message:"DB 바인딩 없음" }, 500);
+    const ans = await pickDailyAnswer(env.DB, seoulDateKey());
+    if (!ans) return json({ ok:false, message:"정답 생성 실패" }, 500);
+    return json({ ok:true, answer:{ word: ans.word, pos: ans.pos||null, level: ans.level||null, definition: ans.definition||null } });
+  }catch(e){
+    return json({ ok:false, message:"giveup 오류", detail:String(e && e.stack ? e.stack : e) }, 500);
   }
 }

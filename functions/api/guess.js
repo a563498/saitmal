@@ -1,88 +1,46 @@
-// functions/api/guess.js
-import {
-  json,
-  bad,
-  ensureTodayAnswer,
-  lookupEntry,
-  similarityPercent,
-  normalizeWord,
-} from "./_common.js";
+import { json, seoulDateKey, pickDailyAnswer, d1GetByWord, similarityScore } from './_common.js';
 
-export async function onRequestGet({ env, request }) {
-  try {
+export async function onRequestGet({ request, env }){
+  try{
+    if (!env.DB) return json({ ok:false, message:"D1 바인딩(DB)이 없어요." }, 500);
+
     const url = new URL(request.url);
-    const input = normalizeWord(url.searchParams.get("word") || "");
-    if (!input) return bad("word 파라미터가 비었어요.");
+    const w = url.searchParams.get("word") || "";
+    if (!w.trim()) return json({ ok:false, message:"단어를 입력하세요." }, 400);
 
-    // 오늘 정답 보장(없으면 생성)
-    const { answer } = await ensureTodayAnswer(env);
+    const dateKey = seoulDateKey();
+    const ans = await pickDailyAnswer(env.DB, dateKey);
+    if (!ans) return json({ ok:false, message:"정답 생성 실패" }, 500);
 
-    // 입력 단어 DB 조회
-    const entry = await lookupEntry(env, input);
-    if (!entry) {
-      return json({
-        ok: true,
-        data: {
-          word: input,
-          percent: 0,
-          isCorrect: false,
-          notFound: true,
-          message: "사전에 없는 단어예요.",
-        },
-      });
-    }
+    const g = await d1GetByWord(env.DB, w);
+    if (!g) return json({ ok:false, message:"사전에 없는 단어예요." }, 404);
 
-    const isCorrect = entry.word === answer.word;
-    let percent = similarityPercent(entry.word, answer.word);
+    const sim = similarityScore(g, ans);
+    const percent = Math.max(1, Math.min(100, Math.round(sim*100)));
 
-    // 힌트/보정(품사 같으면 약간 가산)
-    if (entry.pos && answer.pos && entry.pos === answer.pos) {
-      percent = Math.min(100, percent + 5);
-    }
-    if (isCorrect) percent = 100;
+    const isCorrect = (g.word === ans.word);
 
-    const clues = {
-      글자수: {
-        answer: (answer.word || "").length,
-        input: (entry.word || "").length,
-        delta: (entry.word || "").length - (answer.word || "").length,
-        text:
-          (entry.word || "").length === (answer.word || "").length
-            ? "같음"
-            : (entry.word || "").length > (answer.word || "").length
-            ? `입력(${(entry.word || "").length})이 더 김`
-            : `입력(${(entry.word || "").length})이 더 짧음`,
-      },
-      품사: {
-        answer: answer.pos || "불명",
-        input: entry.pos || "불명",
-        text:
-          (answer.pos || "") && (entry.pos || "") && answer.pos === entry.pos
-            ? "같음"
-            : "다름/불명",
-      },
-      난이도: {
-        answer: answer.level || "없음",
-        input: entry.level || "없음",
-        text:
-          (answer.level || "") &&
-          (entry.level || "") &&
-          answer.level === entry.level
-            ? "같음"
-            : "다름/불명",
-      },
-    };
+    // 단서(구체화)
+    const deltaLen = g.word.length - ans.word.length;
+    const lenHint = deltaLen === 0 ? "같음" : (deltaLen > 0 ? `입력(${g.word.length})이 더 김` : `입력(${g.word.length})이 더 짧음`);
+
+    const posHint = (g.pos && ans.pos && g.pos === ans.pos) ? "같음" : "다름/불명";
+    const levelHint = (g.level && ans.level && g.level === ans.level) ? "같음" : "다름/불명";
 
     return json({
-      ok: true,
-      data: {
-        word: entry.word,
+      ok:true,
+      data:{
+        word:g.word,
         percent,
         isCorrect,
-        clues,
-      },
+        clues:{
+          글자수: { answer: ans.word.length, input: g.word.length, delta: deltaLen, text: lenHint },
+          품사: { answer: ans.pos||null, input: g.pos||null, text: posHint },
+          난이도: { answer: ans.level||null, input: g.level||null, text: levelHint }
+        }
+      }
     });
-  } catch (e) {
-    return json({ ok: false, message: `guess 실패: ${e?.message || e}` }, 500);
+  }catch(e){
+    return json({ ok:false, message:"guess 오류", detail:String(e && e.stack ? e.stack : e) }, 500);
   }
 }
