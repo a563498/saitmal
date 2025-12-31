@@ -98,8 +98,10 @@ const CONCEPT = new Map([
   ["순식간","짧은시간"],["잠시","짧은시간"],["찰나","짧은시간"],["금세","짧은시간"],["바로","짧은시간"],["즉각","짧은시간"],
   ["당장에","짧은시간"],["순간","짧은시간"],
   ["시간","짧은시간"],["때","짧은시간"],["시각","짧은시간"],["잠깐","짧은시간"],["조금","짧은시간"],["잠시후","짧은시간"],["곧바로","짧은시간"],
+  ["지금","짧은시간"],["현재","짧은시간"],
 
   // 시간 개념 확장
+  ["오늘","시간개념"],["내일","시간개념"],["어제","시간개념"],["지금","시간개념"],["현재","시간개념"],
   ["시간","시간개념"],["순간","시간개념"],["간격","시간개념"],["기간","시간개념"],["잠깐","시간개념"],
 
   // 시간/연도
@@ -121,15 +123,59 @@ const TIME_KW = new Set([
   "시간","때","순간","찰나","잠시","잠깐","금방","방금","금세","곧","이내","바로","즉시","즉각","당장","얼른",
   "지금","오늘","내일","어제","방금전","곧바로","순식간","재빨리","빨리","늦게","일찍"
 ]);
+
 function timeKeywordScore(gAll, aAll){
+  // '금방(즉시/짧은 간격)' vs '오늘/내일(일자)' 같은 경우는
+  // 단순 교집합이 0이라도 사람 기준으로는 어느 정도 연상이 된다.
   const g = new Set((gAll||[]).filter(t=>TIME_KW.has(t)));
   const a = new Set((aAll||[]).filter(t=>TIME_KW.has(t)));
   if (!g.size || !a.size) return 0;
-  let inter=0;
+
+  // 그룹 정의
+  const GROUP = new Map([
+    // 즉시/짧은 간격
+    ["금방","immediate"],["방금","immediate"],["금세","immediate"],["곧","immediate"],["이내","immediate"],["바로","immediate"],
+    ["즉시","immediate"],["즉각","immediate"],["당장","immediate"],["얼른","immediate"],["재빨리","immediate"],["빨리","immediate"],
+    ["곧바로","immediate"],["순식간","immediate"],
+    // 일자/상대일
+    ["오늘","day"],["내일","day"],["어제","day"],
+    // 일반 시간/시점
+    ["지금","now"],["일찍","now"],["늦게","now"],
+    ["시간","time"],["때","time"],["순간","time"],["찰나","time"],["잠시","time"],["잠깐","time"],["방금전","time"],
+  ]);
+
+  const groupOf = (t)=> GROUP.get(t) || "time";
+
+  // 동일 그룹: 강함, 다른 그룹: 약함(하지만 0은 아님)
+  const pairScore = (g1, g2)=>{
+    if (g1 === g2) return 1.0;
+    const key = `${g1}|${g2}`;
+    const rev = `${g2}|${g1}`;
+    if (key === "immediate|now" || rev === "immediate|now") return 0.75;
+    if (key === "immediate|time" || rev === "immediate|time") return 0.60;
+    if (key === "immediate|day" || rev === "immediate|day") return 0.35;
+    if (key === "day|time" || rev === "day|time") return 0.55;
+    if (key === "day|now" || rev === "day|now") return 0.45;
+    if (key === "now|time" || rev === "now|time") return 0.70;
+    return 0.40;
+  };
+
+  // 각 키워드 쌍 중 최대 유사도
+  let best = 0;
+  for (const gt of g){
+    const gg = groupOf(gt);
+    for (const at of a){
+      const ag = groupOf(at);
+      best = Math.max(best, pairScore(gg, ag));
+    }
+  }
+
+  // 교집합(정확히 같은 키워드)이 있으면 추가 보너스
+  let inter = 0;
   for (const t of g) if (a.has(t)) inter++;
-  // 최소 1개라도 겹치면 기본 점수, 2~3개 이상 겹치면 빠르게 상승
-  const raw = (inter + 1) / 4; // 0.5, 0.75, 1.0...
-  return Math.max(0, Math.min(1, raw));
+  const bonus = inter ? Math.min(0.25, inter * 0.12) : 0;
+
+  return Math.max(0, Math.min(1, best + bonus));
 }
 
 
@@ -551,12 +597,17 @@ export function similarityScore(guess, answer) {
   // 시간 개념(오늘/내일/방금/곧/즉시...)은 사람 기준 유사도에 큰 영향을 주므로 보강
 const sTime = timeKeywordScore(gAll, aAll);
 
-const score = posPenalty * (
-    0.35 * sConcept +
-    0.35 * sDef2 +
-    0.20 * sRel2 +
-    0.10 * sWTok
-  );
+// 시간/즉시성 컨셉이 강하게 맞으면(예: 금방 ↔ 오늘/지금/방금/곧)
+// 품사(부사/명사) 불일치 페널티를 완화해서 '사람 기준' 연상을 살린다.
+const posPenalty2 = (posPenalty < 1 && sTime >= 0.55) ? Math.max(posPenalty, 0.85) : posPenalty;
+
+const score = posPenalty2 * (
+  0.28 * sConcept +
+  0.28 * sDef2 +
+  0.18 * sRel2 +
+  0.10 * sWTok +
+  0.16 * sTime
+);
 
   // 낮은 점수(우연한 겹침)는 0으로 눌러서 납득 가능한 결과 유지
   return score < 0.05 ? 0 : score;
@@ -584,8 +635,10 @@ export function scoreToPercentScaled(score, maxRaw, { isCorrect = false } = {}) 
   const s = Number.isFinite(score) ? score : 0;
   const m = Number.isFinite(maxRaw) ? maxRaw : 0;
   if (s <= 0 || m <= 0) return 0;
-  // 최고 후보(정답 제외)가 99%가 되도록 선형 스케일
-  let p = Math.round(99 * (s / m));
+  // 최고 후보(정답 제외)를 기준으로 비선형 스케일(상위 점수 쏠림 완화)
+  const r = Math.max(0, Math.min(1, s / m));
+  const gamma = 2.0;
+  let p = Math.round(99 * Math.pow(r, gamma));
   if (p < 0) p = 0;
   if (p > 99) p = 99;
   return p;
@@ -704,7 +757,7 @@ export async function getDbTop(env, dateKey, { limit = 10 } = {}) {
              , ${exExpr} AS example
       FROM senses s
       JOIN entries e ON e.${eId}=s.${sFk}
-      WHERE (${where})
+      WHERE e.${eWord} NOT LIKE '% %' AND (${where})
       LIMIT 6000
     `;
     await pushRows(await env.DB.prepare(sql).bind(...params).all());
