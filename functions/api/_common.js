@@ -491,6 +491,17 @@ export async function d1GetByWord(DB, word) {
   };
 }
 
+
+function isSingleWordKorean(w){
+  if(!w) return false;
+  const s=String(w).trim();
+  if(!s) return false;
+  if(/\s/.test(s)) return false;
+  // 한글 단일 표제어만 (사전의 구/속담 등 제외)
+  if(!/^[가-힣]+$/.test(s)) return false;
+  if(s.length>10) return false;
+  return true;
+}
 // ---------------- similarity ----------------
 function toBigrams(word) {
   const w = normalizeWord(word);
@@ -630,15 +641,28 @@ export function scoreToPercent(score, { isCorrect = false } = {}) {
 }
 
 // 일일 스케일(= DB에서 뽑은 Top 후보 중 최고 raw score)을 이용해 %를 상대적으로 환산
-export function scoreToPercentScaled(score, maxRaw, { isCorrect = false } = {}) {
+export function scoreToPercentScaled(score, maxRaw, { isCorrect = false, minRaw = 0, rank = null } = {}) {
   if (isCorrect) return 100;
   const s = Number.isFinite(score) ? score : 0;
-  const m = Number.isFinite(maxRaw) ? maxRaw : 0;
-  if (s <= 0 || m <= 0) return 0;
-  // 최고 후보(정답 제외)를 기준으로 비선형 스케일(상위 점수 쏠림 완화)
-  const r = Math.max(0, Math.min(1, s / m));
-  const gamma = 2.0;
+  const hi = Number.isFinite(maxRaw) ? maxRaw : 0;
+  const lo = Number.isFinite(minRaw) ? minRaw : 0;
+  if (s <= 0 || hi <= 0) return 0;
+
+  // 1) raw 기반 정규화(상/하위 분산 확보)
+  const denom = Math.max(1e-9, hi - lo);
+  const r = Math.max(0, Math.min(1, (s - lo) / denom));
+
+  // 2) 비선형(상위 쏠림 완화)
+  const gamma = 1.6;
   let p = Math.round(99 * Math.pow(r, gamma));
+
+  // 3) rank 보정(상위에서 99가 과도하게 반복되는 현상 방지)
+  if (typeof rank === "number" && rank >= 1) {
+    // 상위권일수록 조금씩 깎아 분배(1등은 그대로)
+    const decay = Math.min(20, rank - 1);
+    p = Math.max(0, p - decay);
+  }
+
   if (p < 0) p = 0;
   if (p > 99) p = 99;
   return p;
@@ -802,6 +826,7 @@ export async function getDbTop(env, dateKey, { limit = 10 } = {}) {
   for (const r of rows) {
     const w = (r.word || "").trim();
     if (!w || w === ans.word) continue;
+    if (!isSingleWordKorean(w)) continue;
     const g = {
       word: w,
       pos: r.pos || null,
@@ -818,11 +843,12 @@ export async function getDbTop(env, dateKey, { limit = 10 } = {}) {
   const maxRaw = scored.length ? scored[0].raw : 0;
 
   // 상위 1000개 저장(랭크/빠른 조회용)
+  const minRaw = scored.length ? scored[Math.min(scored.length-1, 999)].raw : 0;
   const topN = scored.slice(0, 1000).map((x,i)=>({
     rank: i+1,
     word: x.word,
     raw: x.raw,
-    percent: scoreToPercentScaled(x.raw, maxRaw, { isCorrect:false }),
+    percent: scoreToPercentScaled(x.raw, maxRaw, { isCorrect:false, minRaw, rank: i+1 }),
   }));
 
   // word -> rank/percent 맵

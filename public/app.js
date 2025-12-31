@@ -1,3 +1,4 @@
+const APP_VERSION = "v1.0.0";
 /* FX */
 function rand(min,max){ return Math.random()*(max-min)+min; }
 
@@ -502,3 +503,9 @@ document.addEventListener("DOMContentLoaded", ()=>{ init(); updateViewportLayout
 window.addEventListener("resize", updateViewportLayout, {passive:true});
 (window.visualViewport&&window.visualViewport.addEventListener("resize", updateViewportLayout, {passive:true}));
 (window.visualViewport&&window.visualViewport.addEventListener("scroll", updateViewportLayout, {passive:true}));
+
+// footer version
+window.addEventListener('DOMContentLoaded', ()=>{
+  const el = document.getElementById('appVersion');
+  if (el) el.textContent = APP_VERSION;
+});
