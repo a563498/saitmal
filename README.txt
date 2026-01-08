@@ -1,22 +1,16 @@
 
-사잇말 v1.3 패치 (FTS 기반 의미 유사도 랭킹)
+사잇말 v1.3.1 핫픽스 (Error 1101 수정)
 
-이 ZIP에는 '수정/추가된 파일'만 포함되어 있습니다.
-UI 변경은 없고, 내부 로직만 교체합니다.
+원인:
+- D1의 batch API를 잘못 사용(env.DB.batch() builder 방식)하여 런타임 예외(TypeError)가 발생 → Error 1101
 
-구성:
-- functions/lib/rank.js        : FTS(BM25)로 answer_rank 생성
-- functions/api/top.js         : top 조회 (+ build=1 개발용)
-- functions/api/guess.js       : rank 기반 percent 계산
-- sql/setup.sql                : answer_rank, FTS, 인덱스 SQL 모음
+수정:
+- D1 공식 batch 호출 방식(env.DB.batch([...preparedStatements]))으로 변경
+- 너무 큰 batch를 피하기 위해 100개 단위로 chunk 처리
 
-적용 방법:
-1) 각 파일을 기존 프로젝트의 동일 경로에 덮어쓰기(또는 병합)
-2) D1에 sql/setup.sql 실행(이미 했다면 스킵)
-3) 환경변수:
-   - RANK_TOPK=3000
-   - RANK_CANDIDATE_LIMIT=8000
-4) 개발 확인(1회):
-   /api/top?limit=10&build=1
-5) 운영 전환:
-   - build=1 경로 제거 또는 관리자 전용으로 잠금
+이 ZIP에는 '수정된 파일만' 포함되어 있습니다.
+- functions/lib/rank.js
+
+적용:
+1) functions/lib/rank.js 를 프로젝트에 덮어쓰기
+2) 배포(재배포) 후 /api/top?limit=10&build=1 한 번 실행해 랭킹 생성 확인
