@@ -1,46 +1,33 @@
-import { json, seoulDateKey, getDailyAnswer, ensureAnswerRank, getAnswerRankTop } from './_common.js';
 
-export async function onRequestGet(context){
-  const { env, request, waitUntil } = context;
-  try{
-    if (!env.DB) {
-      return json({ ok:false, message:"D1 바인딩(DB)이 없어요. Pages > Settings > Bindings에서 D1을 연결하세요." }, 500);
-    }
+import { buildAnswerRank } from '../lib/rank.js';
 
-    const url = new URL(request.url);
-    const reqLimit = Math.max(1, Math.min(10, Number(url.searchParams.get("limit") || "10")));
-    const dateKey = seoulDateKey();
+export async function onRequestGet({ env, request }) {
+  const url = new URL(request.url);
+  const limit = Number(url.searchParams.get('limit') ?? 10);
+  const build = url.searchParams.get('build') === '1';
+  const dateKey = new Date().toISOString().slice(0,10);
 
-    const ans = await getDailyAnswer(env, dateKey);
-
-    const topK = Number(env?.RANK_TOPK || 5000);
-    const candidateLimit = Number(env?.RANK_CANDIDATE_LIMIT || 12000);
-
-    const wantsBuild = (url.searchParams.get("build") === "1") || (url.searchParams.get("debug") === "1");
-    let build = null;
-
-    if (wantsBuild){
-      build = await ensureAnswerRank(env, dateKey, { topK, candidateLimit });
-    } else {
-      try{
-        if (typeof waitUntil === 'function') {
-          waitUntil(ensureAnswerRank(env, dateKey, { topK, candidateLimit }));
-        }
-      } catch {}
-    }
-
-    const items = await getAnswerRankTop(env, dateKey, reqLimit);
-
-    const payload = {
-      ok: true,
-      dateKey,
-      answer: ans ? { word: ans.word, pos: ans.pos || null, level: ans.level || null } : null,
-      items,
-    };
-    if (build) payload.build = build;
-
-    return json(payload);
-  } catch(e) {
-    return json({ ok:false, message:"top 오류", detail:String(e && e.stack ? e.stack : e) }, 500);
+  if (build) {
+    const ans = await env.DB.prepare(`
+      SELECT word_id FROM answer_pool WHERE is_active=1 ORDER BY last_used_at IS NULL DESC LIMIT 1
+    `).first();
+    if (!ans) return new Response(JSON.stringify({ ok:false, message:"정답 없음" }), { status:500 });
+    const res = await buildAnswerRank({ env, dateKey, answerWordId: ans.word_id });
+    return new Response(JSON.stringify({ ok:true, build:res }), { headers:{'content-type':'application/json'} });
   }
+
+  const rows = await env.DB.prepare(`
+    SELECT ar.word_id, ar.rank, ar.score, le.display_word, le.pos
+    FROM answer_rank ar
+    JOIN lex_entry le ON le.entry_id = ar.word_id
+    WHERE ar.date_key = ?
+    ORDER BY ar.rank
+    LIMIT ?
+  `).bind(dateKey, limit).all();
+
+  return new Response(JSON.stringify({
+    ok:true,
+    dateKey,
+    items: rows.results ?? []
+  }), { headers:{'content-type':'application/json'} });
 }
