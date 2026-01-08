@@ -15,7 +15,6 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
   const TOPK = Number(env.RANK_TOPK ?? 3000);
   const CAND_LIMIT = Number(env.RANK_CANDIDATE_LIMIT ?? 8000);
 
-  // 1) 정답의 정의(뜻) 가져오기
   const defs = await env.DB.prepare(`
     SELECT definition FROM answer_sense WHERE word_id = ?
   `).bind(answerWordId).all();
@@ -24,7 +23,6 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
     return { ok: false, message: "정답 정의 없음" };
   }
 
-  // 2) MATCH 쿼리 토큰 만들기(최대 20개)
   const tokens = Array.from(new Set(
     defs.results
       .flatMap(r => (r.definition || "").split(/\s+/))
@@ -38,30 +36,33 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
 
   const match = tokens.map(t => `"${t.replace(/"/g, "")}"`).join(" OR ");
 
-  // 3) FTS 결과는 sense 단위로 중복될 수 있으므로 word_id로 집계(MIN score)
+  // bm25()는 집계 내부에서 직접 쓰지 말고, 서브쿼리에서 score로 만든 뒤 집계
   const rows = await env.DB.prepare(`
-    SELECT word_id, MIN(bm25(answer_sense_fts)) AS score
-    FROM answer_sense_fts
-    WHERE answer_sense_fts MATCH ?
+    SELECT word_id, MIN(score) AS score
+    FROM (
+      SELECT word_id, bm25(answer_sense_fts) AS score
+      FROM answer_sense_fts
+      WHERE answer_sense_fts MATCH ?
+      LIMIT ?
+    )
     GROUP BY word_id
     ORDER BY score
     LIMIT ?
-  `).bind(match, CAND_LIMIT).all();
+  `).bind(match, CAND_LIMIT * 3, CAND_LIMIT).all();
 
   if (!rows?.results?.length) {
     return { ok: false, message: "후보군 추출 실패(0건)" };
   }
 
-  // 4) 기존 랭킹 삭제
   await env.DB.prepare(`DELETE FROM answer_rank WHERE date_key = ?`)
     .bind(dateKey).run();
 
-  // 5) TopK insert (중복 방지: JS에서도 Set으로 2차 필터)
   const statements = [];
   const seen = new Set();
   let rank = 1;
 
   for (const r of rows.results) {
+    if (!r?.word_id) continue;
     if (seen.has(r.word_id)) continue;
     seen.add(r.word_id);
 
@@ -75,7 +76,6 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
     if (rank > TOPK) break;
   }
 
-  // 100개씩 배치 실행
   for (const chunk of chunkArray(statements, 100)) {
     await env.DB.batch(chunk);
   }
