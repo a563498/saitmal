@@ -34,6 +34,9 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
   const TOPK = Number(env.RANK_TOPK ?? 3000);
   const CAND_LIMIT = Number(env.RANK_CANDIDATE_LIMIT ?? 8000);
 
+  // D1 변수 제한 대비: IN(...) 최대 바인딩 개수(안전값)
+  const MAX_IN_VARS = 80;
+
   await ensureAnswerRankSchema(env);
 
   const defs = await env.DB.prepare(`
@@ -82,7 +85,8 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
   const ids = top.map(r => r.word_id);
   const meta = new Map();
 
-  for (const chunk of chunkArray(ids, 200)) {
+  // MAX_IN_VARS 단위로 lex_entry 조회 (변수 제한 회피)
+  for (const chunk of chunkArray(ids, MAX_IN_VARS)) {
     const placeholders = chunk.map(() => '?').join(',');
     const lex = await env.DB.prepare(`
       SELECT entry_id, display_word, pos
