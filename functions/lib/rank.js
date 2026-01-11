@@ -30,12 +30,48 @@ async function ensureAnswerRankSchema(env) {
   `).run();
 }
 
+async function fetchMetaFromAnswerPool(env, ids) {
+  // D1 바인딩 변수 제한 대비
+  const MAX_IN_VARS = 80;
+  const meta = new Map();
+
+  for (const chunk of chunkArray(ids, MAX_IN_VARS)) {
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = await env.DB.prepare(`
+      SELECT word_id, display_word, pos
+      FROM answer_pool
+      WHERE word_id IN (${placeholders})
+    `).bind(...chunk).all();
+
+    for (const r of (rows?.results ?? [])) {
+      meta.set(r.word_id, { display_word: r.display_word, pos: r.pos });
+    }
+  }
+  return meta;
+}
+
+async function fetchMetaFromLexEntry(env, ids) {
+  const MAX_IN_VARS = 80;
+  const meta = new Map();
+
+  for (const chunk of chunkArray(ids, MAX_IN_VARS)) {
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = await env.DB.prepare(`
+      SELECT entry_id, display_word, pos
+      FROM lex_entry
+      WHERE entry_id IN (${placeholders})
+    `).bind(...chunk).all();
+
+    for (const r of (rows?.results ?? [])) {
+      meta.set(r.entry_id, { display_word: r.display_word, pos: r.pos });
+    }
+  }
+  return meta;
+}
+
 export async function buildAnswerRank({ env, dateKey, answerWordId }) {
   const TOPK = Number(env.RANK_TOPK ?? 3000);
   const CAND_LIMIT = Number(env.RANK_CANDIDATE_LIMIT ?? 8000);
-
-  // D1 변수 제한 대비: IN(...) 최대 바인딩 개수(안전값)
-  const MAX_IN_VARS = 80;
 
   await ensureAnswerRankSchema(env);
 
@@ -83,24 +119,20 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
 
   const top = cand.slice(0, TOPK);
   const ids = top.map(r => r.word_id);
-  const meta = new Map();
 
-  // MAX_IN_VARS 단위로 lex_entry 조회 (변수 제한 회피)
-  for (const chunk of chunkArray(ids, MAX_IN_VARS)) {
-    const placeholders = chunk.map(() => '?').join(',');
-    const lex = await env.DB.prepare(`
-      SELECT entry_id, display_word, pos
-      FROM lex_entry
-      WHERE entry_id IN (${placeholders})
-    `).bind(...chunk).all();
+  // 1차: answer_pool에서 메타 조회
+  const meta = await fetchMetaFromAnswerPool(env, ids);
 
-    for (const r of (lex?.results ?? [])) {
-      meta.set(r.entry_id, { display_word: r.display_word, pos: r.pos });
-    }
+  // 2차(안전): answer_pool에 없는 것만 lex_entry로 보충
+  const missing = ids.filter(id => !meta.has(id));
+  if (missing.length) {
+    const meta2 = await fetchMetaFromLexEntry(env, missing);
+    for (const [k, v] of meta2.entries()) meta.set(k, v);
   }
 
   const statements = [];
   let rank = 1;
+
   for (const r of top) {
     const m = meta.get(r.word_id) ?? { display_word: null, pos: null };
     statements.push(
@@ -115,5 +147,5 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
     await env.DB.batch(chunk);
   }
 
-  return { ok: true, count: statements.length };
+  return { ok: true, count: statements.length, metaMissing: missing.length };
 }
