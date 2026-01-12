@@ -31,7 +31,6 @@ async function ensureAnswerRankSchema(env) {
 }
 
 async function fetchMetaFromAnswerPool(env, ids) {
-  // D1 바인딩 변수 제한 대비
   const MAX_IN_VARS = 80;
   const meta = new Map();
 
@@ -45,25 +44,6 @@ async function fetchMetaFromAnswerPool(env, ids) {
 
     for (const r of (rows?.results ?? [])) {
       meta.set(r.word_id, { display_word: r.display_word, pos: r.pos });
-    }
-  }
-  return meta;
-}
-
-async function fetchMetaFromLexEntry(env, ids) {
-  const MAX_IN_VARS = 80;
-  const meta = new Map();
-
-  for (const chunk of chunkArray(ids, MAX_IN_VARS)) {
-    const placeholders = chunk.map(() => '?').join(',');
-    const rows = await env.DB.prepare(`
-      SELECT entry_id, display_word, pos
-      FROM lex_entry
-      WHERE entry_id IN (${placeholders})
-    `).bind(...chunk).all();
-
-    for (const r of (rows?.results ?? [])) {
-      meta.set(r.entry_id, { display_word: r.display_word, pos: r.pos });
     }
   }
   return meta;
@@ -120,15 +100,7 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
   const top = cand.slice(0, TOPK);
   const ids = top.map(r => r.word_id);
 
-  // 1차: answer_pool에서 메타 조회
   const meta = await fetchMetaFromAnswerPool(env, ids);
-
-  // 2차(안전): answer_pool에 없는 것만 lex_entry로 보충
-  const missing = ids.filter(id => !meta.has(id));
-  if (missing.length) {
-    const meta2 = await fetchMetaFromLexEntry(env, missing);
-    for (const [k, v] of meta2.entries()) meta.set(k, v);
-  }
 
   const statements = [];
   let rank = 1;
@@ -147,5 +119,6 @@ export async function buildAnswerRank({ env, dateKey, answerWordId }) {
     await env.DB.batch(chunk);
   }
 
-  return { ok: true, count: statements.length, metaMissing: missing.length };
+  const missing = ids.filter(id => !meta.has(id)).length;
+  return { ok: true, count: statements.length, metaMissing: missing };
 }
