@@ -1,22 +1,22 @@
-사잇말 v1.3.9 패치 (매핑 정정: answer_pool 기반으로 통일)
+사잇말 통합 패치 v1.4.1 (v1.4.0 + v1.4.1)
 
-확인 결과:
-- lex_entry.entry_id IN (answer_rank.word_id) => 0건
-- answer_pool.word_id IN (answer_rank.word_id) => 10건
-즉, answer_rank.word_id는 lex_entry가 아니라 answer_pool의 word_id와 매칭됨.
+포함:
+- v1.4.0: 정답/랭킹 기준 통일(meta/top/guess 동일 정답 사용), dateKey를 KST 기준으로 통일
+- v1.4.1: 추론 입력(엔터/버튼) 시 즉시 '추측한 단어'에 표시(낙관적 UI) + PATCHLOG 누적 기록
 
-수정 내용:
-1) buildAnswerRank: display_word/pos 메타를 answer_pool에서만 조회(lex_entry fallback 제거)
-2) /api/guess: 사용자가 입력한 단어를 answer_pool에서 찾아 word_id를 얻고,
-   그 word_id로 answer_rank를 조회하도록 변경
+변경 파일:
+- saitmal-main/functions/api/meta.js
+- saitmal-main/functions/api/top.js
+- saitmal-main/functions/api/guess.js
+- saitmal-main/public/app.js
+- PATCHLOG.md (추가)
 
-포함 파일:
-- functions/lib/rank.js
-- functions/api/guess.js
+적용 순서:
+1) ZIP 풀기
+2) 위 파일들을 저장소에 덮어쓰기
+3) 배포(커밋/푸시)
+4) 한 번만 실행: /api/top?limit=10&build=1  (오늘자 랭킹 재생성)
+5) 확인: /api/top?limit=10  ,  게임 화면에서 입력 후 Enter/추론 버튼 -> 즉시 리스트 표시
 
-적용:
-1) 두 파일 덮어쓰기
-2) 배포
-3) /api/top?limit=10&build=1 (오늘자 랭킹 재생성; display_word/pos 채워짐)
-4) /api/top?limit=10 확인
-5) /api/guess?word=풀 등으로 rank/percent 확인
+주의:
+- build=1은 운영 시 관리자 키로 잠그는 것을 권장

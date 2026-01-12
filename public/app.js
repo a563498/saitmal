@@ -427,28 +427,73 @@ async function submit(){
   if (state.gameOver){ setStatus('오늘 게임은 종료되었어요. 내일 다시 도전해 주세요!'); return; }
   const inp = $("guessInput");
   if (!inp) return;
-  const word = inp.value.trim();
+
+  const raw = inp.value;
+  const word = (raw || "").trim();
   if (!word) return;
+
+  // 입력 즉시 UI에 반영(네트워크/서버 지연에도 '추측한 단어'가 바로 보이게)
   inp.value = "";
   setStatus("");
 
+  const now = Date.now();
+  state.guesses = state.guesses || [];
+  state.startAt = state.startAt || now;
+  state.tries = (state.tries||0) + 1;
+  state.lastWord = word;
+
+  // 임시 표시용 엔트리(성공/실패와 무관하게 목록에 남김)
+  state.guesses.push({ word, percent: 0, rank: null, clues: null, ts: now, pending: true });
+  saveState();
+  render();
+
   try{
     const res = await apiJson(`/api/guess?word=${encodeURIComponent(word)}`);
-    const d = res.data;
-    const percent = typeof d.percent === "number" ? d.percent : 0;
-    state.lastWord = d.word;
-    state.tries = (state.tries||0) + 1;
+    const d = res.data || {};
+    const percent = (typeof d.percent === "number") ? d.percent : 0;
+
+    // 방금 추가한 pending 엔트리를 찾아 갱신(없으면 upsert)
+    const pendingIdx = state.guesses.findIndex(x => x.pending && x.ts === now && x.word === word);
+    if (pendingIdx >= 0){
+      state.guesses[pendingIdx].word = d.word || word;
+      state.guesses[pendingIdx].percent = percent;
+      state.guesses[pendingIdx].rank = (typeof d.rank === 'number' ? d.rank : null);
+      state.guesses[pendingIdx].clues = d.clues;
+      state.guesses[pendingIdx].pending = false;
+    } else {
+      const existing = state.guesses.find(x => x.word === (d.word || word));
+      if (existing){
+        existing.percent = Math.max(existing.percent||0, percent);
+        existing.rank = (typeof d.rank === 'number' ? d.rank : existing.rank);
+        existing.clues = d.clues;
+        existing.ts = now;
+        existing.pending = false;
+      } else {
+        state.guesses.push({ word: d.word || word, percent, rank: (typeof d.rank==='number'?d.rank:null), clues: d.clues, ts: now, pending: false });
+      }
+    }
+
+    state.lastWord = d.word || word;
     state.best = Math.max(state.best||0, percent);
-    state.guesses = state.guesses || [];
-const now = Date.now();
-state.lastWord = d.word;
-const existing = state.guesses.find(x => x.word === d.word);
-if (existing){
-  // 중복 단어는 리스트에 1번만: 더 높은 %는 보존, 최근 추론은 맨 위로 올라오게 ts 갱신
-  existing.percent = Math.max(existing.percent||0, percent);
-  existing.clues = d.clues;
-  existing.rank = (typeof d.rank === 'number' ? d.rank : existing.rank);
-  existing.ts = now;
+
+    saveState();
+    render();
+
+    if (d.isCorrect){
+      state.gameOver = true;
+      saveState();
+      $("topBtn")?.classList.remove("hidden");
+      confettiBurst();
+      setStatus(`정답! ${state.tries}번째 · ${fmtTime(Date.now()-(state.startAt||Date.now()))}`);
+    }
+  }catch(e){
+    // 실패해도 입력 자체는 기록되어야 하므로 목록은 유지
+    const pendingIdx = state.guesses.findIndex(x => x.pending && x.ts === now && x.word === word);
+    if (pendingIdx >= 0) state.guesses[pendingIdx].pending = false;
+    saveState();
+    render();
+    setStatus(e.message);
+  }
 } else {
   state.guesses.push({ word: d.word, percent, rank: (typeof d.rank==='number'?d.rank:null), clues: d.clues, ts: now });
 }
