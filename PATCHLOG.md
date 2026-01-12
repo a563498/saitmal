@@ -1,9 +1,9 @@
-# 사잇말 패치 로그
+# PATCHLOG
 
-## v1.4.1 (2026-01-12)
-- 추론 입력 후(버튼/엔터) '추측한 단어' 목록에 즉시 표시되지 않는 문제를 방지하기 위해,
-  프론트엔드 submit 로직을 **낙관적(optimistic) 업데이트** 방식으로 변경.
-  - 입력 즉시 pending 엔트리를 state.guesses에 추가하고 render()
-  - /api/guess 응답 수신 시 해당 엔트리를 percent/rank로 갱신
-  - /api/guess 실패 시에도 입력 기록은 남기고 pending만 해제
-- UI(스타일/레이아웃)는 변경 없음.
+## v1.4.6 (통합: v1.4.4 + v1.4.5 + 추가 수정)
+- (빌드 오류 수정) `percentFromRank` export를 `functions/lib/rank.js`에 복구하여 Pages Functions 빌드 실패 해결.
+- (게임 규칙) 정답 단어는 `answer_rank`(상위 유사어 목록)에서 **제외**하도록 변경.
+  - 따라서 `/api/top`에 노출되는 랭킹에는 100%가 존재하지 않음(최대 99.99).
+  - 정답을 맞힌 경우에만 `/api/guess`에서 `isCorrect: true`와 함께 `percent: 100.00`으로 반환.
+- (유사도 강화) FTS(bm25) 1차 후보 + 정의문 키워드/구(2-그램) 겹침 기반 2차 리랭킹 유지.
+- (점수) percent는 score 기반(소수점 2자리)으로 계산하여 `answer_rank.percent`에 저장.

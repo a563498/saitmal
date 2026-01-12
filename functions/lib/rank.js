@@ -1,3 +1,9 @@
+// rank.js (v1.4.6)
+// - percentFromRank 하위호환 export 포함
+// - 정답은 answer_rank에서 제외 (랭킹 1위는 정답 제외 최상위 유사어)
+// - percent는 score 기반(소수점 2자리), 랭킹에서는 최대 99.99
+// - 2단계 리랭킹: FTS 후보 + 정의문 키워드/구(2-그램) 겹침
+
 function chunkArray(arr, size) {
   const out = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -10,6 +16,22 @@ function clamp(n, a, b) {
 
 function round2(n) {
   return Math.round(n * 100) / 100;
+}
+
+// Backward-compat export: some endpoints import percentFromRank.
+// NOTE: v1.4.2+ prefers answer_rank.percent, but we keep this to avoid build failures.
+export function percentFromRank(rank, TOPK = 3000) {
+  if (rank == null) return 0;
+  if (TOPK <= 1) return 0;
+
+  // Smoothly decreasing curve; cap to 99.99 in ranking context.
+  const x = (rank - 1) / (TOPK - 1); // 0..1
+  const curved = Math.pow(1 - x, 1.35); // 1..0
+  let pct = curved * 99.99;
+  pct = Math.round(pct * 100) / 100;
+  if (pct >= 100) pct = 99.99;
+  if (pct < 0) pct = 0;
+  return pct;
 }
 
 const STOPWORDS = new Set([
@@ -83,7 +105,6 @@ function extractCandidateTokens(defTexts) {
 }
 
 function extractCandidatePhrases(defTexts) {
-  // 간단한 2-그램 구(띄어쓰기 기반). 너무 길게 안 가고, 의미 약한 것 제외.
   const phrases = [];
   for (const t of defTexts) {
     const parts = (t || '')
@@ -93,7 +114,6 @@ function extractCandidatePhrases(defTexts) {
     for (let i = 0; i < parts.length - 1; i++) {
       const a = parts[i], b = parts[i+1];
       if (!a || !b) continue;
-      // 너무 범용적인 조합은 제외
       if (STOPWORDS.has(a) || STOPWORDS.has(b)) continue;
       phrases.push(`${a} ${b}`);
     }
@@ -147,7 +167,6 @@ async function smartTopTokens(env, defTexts, limit = 12) {
 }
 
 function buildMatch(tokens, phrases) {
-  // AND 중심 + 보조 OR + (가능하면) 구(phrase) OR
   const andPart = tokens.slice(0, 5).map(t => `"${t.replace(/"/g, "")}"`).join(" AND ");
   const orPartTokens = tokens.slice(5, 12);
   const orPart = orPartTokens.length
@@ -164,7 +183,6 @@ function buildMatch(tokens, phrases) {
 }
 
 function buildKeywordSet(tokens, phrases) {
-  // 리랭킹용: 단어 토큰 + 구(phrase)를 키워드로 사용
   const set = new Set();
   for (const t of tokens) set.add(t);
   for (const p of (phrases || []).slice(0, 5)) set.add(p);
@@ -172,13 +190,11 @@ function buildKeywordSet(tokens, phrases) {
 }
 
 async function fetchDefinitionsForWordIds(env, ids) {
-  // word_id별 definition 합치기
   const MAX_IN_VARS = 80;
   const defs = new Map();
 
   for (const chunk of chunkArray(ids, MAX_IN_VARS)) {
     const placeholders = chunk.map(() => '?').join(',');
-    // group_concat은 sense 여러 개를 한 텍스트로 합쳐줌
     const rows = await env.DB.prepare(`
       SELECT word_id, group_concat(definition, ' ') AS defs
       FROM answer_sense
@@ -194,9 +210,6 @@ async function fetchDefinitionsForWordIds(env, ids) {
 }
 
 function humanOverlapScore(text, keywordSet) {
-  // 사람이 납득하는 느낌: "정답의 핵심어/구가 후보 뜻에 얼마나 직접 나타나는가"
-  // - 토큰은 부분문자열 포함으로 판단(한국어는 형태변화가 있으니)
-  // - 구(phrase)는 더 높은 가중치
   if (!text) return 0;
   let score = 0;
   for (const k of keywordSet) {
@@ -209,6 +222,11 @@ function humanOverlapScore(text, keywordSet) {
 
 /**
  * Build ranks using FTS + "human overlap" rerank and store topK with percent.
+ * @param {object} params
+ * @param {any} params.env
+ * @param {string} params.dateKey KST YYYY-MM-DD
+ * @param {string} params.answerWordId answer_pool.word_id
+ * @param {string|null} params.answerPos answer_pool.pos (e.g., '형용사')
  */
 export async function buildAnswerRank({ env, dateKey, answerWordId, answerPos = null }) {
   const TOPK = Number(env.RANK_TOPK ?? 3000);
@@ -227,7 +245,7 @@ export async function buildAnswerRank({ env, dateKey, answerWordId, answerPos = 
 
   const defTexts = defs.results.map(r => r.definition || '');
 
-  // ✅ 스마트 토큰(희소성 기반) + 구(phrase)
+  // 스마트 토큰 + 구(phrase)
   let tokens = await smartTopTokens(env, defTexts, 12);
   if (!tokens) {
     const raw = extractCandidateTokens(defTexts);
@@ -261,27 +279,29 @@ export async function buildAnswerRank({ env, dateKey, answerWordId, answerPos = 
     : [match, CAND_LIMIT * 3, CAND_LIMIT];
 
   const rows = await stmt.bind(...bindArgs).all();
-  const cand = rows?.results ?? [];
+  let cand = rows?.results ?? [];
   if (!cand.length) {
     return { ok: false, message: "후보군 추출 실패(0건)", tokens, phrases, match };
   }
 
-  // ✅ 2차 리랭킹: 상위 일부만 정의 겹침 점수로 재정렬
+  // ✅ 정답 제외
+  cand = cand.filter(r => r.word_id !== answerWordId);
+  if (!cand.length) {
+    return { ok: false, message: "정답 제외 후 후보 0건", tokens, phrases, match };
+  }
+
+  // 2차 리랭킹
   const rerankBase = cand.slice(0, Math.min(RERANK_N, cand.length));
   const rerankIds = rerankBase.map(r => r.word_id);
   const candDefs = await fetchDefinitionsForWordIds(env, rerankIds);
-
   const keywordSet = buildKeywordSet(tokens, phrases);
 
-  // bm25 score는 작을수록 좋음(더 음수). overlap은 클수록 좋음.
-  // 결합 점수: normBm25 + overlapWeight*overlap
-  // - normBm25는 0~1로 정규화(좋을수록 1)
   let bestScore = rerankBase[0].score;
   let worstScore = bestScore;
   for (const r of rerankBase) worstScore = Math.max(worstScore, r.score);
   const denom = (worstScore - bestScore) || 1;
 
-  const overlapWeight = 0.18; // 과하면 키워드 나열 단어가 올라오므로 보수적으로
+  const overlapWeight = 0.18;
   const reranked = rerankBase.map(r => {
     const normBm25 = (worstScore - r.score) / denom; // 0..1
     const d = candDefs.get(r.word_id) || '';
@@ -292,18 +312,16 @@ export async function buildAnswerRank({ env, dateKey, answerWordId, answerPos = 
 
   reranked.sort((a, b) => b._combined - a._combined);
 
-  // 리랭킹된 상단 + 나머지(리랭킹 안 한 후보)는 뒤에 그대로 붙이기
   const used = new Set(reranked.map(r => r.word_id));
   const tail = cand.filter(r => !used.has(r.word_id));
   const merged = reranked.concat(tail);
 
-  // 저장은 topK만
+  // 저장 topK
   const top = merged.slice(0, TOPK);
   const ids = top.map(r => r.word_id);
   const meta = await fetchMetaFromAnswerPool(env, ids);
 
-  // percent는 bm25 점수 범위 기준(리랭킹 후에도 bm25 기반 percent 유지)
-  // 사람이 느끼는 "점수"는 일관되어야 해서 percent는 bm25로 계산
+  // percent는 score 범위로 계산 (랭킹에서는 0..99.99)
   bestScore = top[0].score;
   worstScore = bestScore;
   for (const r of top) worstScore = Math.max(worstScore, r.score);
@@ -316,11 +334,8 @@ export async function buildAnswerRank({ env, dateKey, answerWordId, answerPos = 
   for (const r of top) {
     const m = meta.get(r.word_id) ?? { display_word: null, pos: null };
     let pct = ((worstScore - r.score) / denom2) * 100;
-    pct = round2(clamp(pct, 0, 100));
-
-    // ✅ 규칙: 정답만 100.00, 나머지는 최대 99.99
-    if (rank === 1) pct = 100.00;
-    else if (pct >= 100) pct = 99.99;
+    pct = round2(clamp(pct, 0, 99.99));
+    if (pct >= 100) pct = 99.99;
 
     statements.push(
       env.DB.prepare(`
