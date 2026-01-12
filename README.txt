@@ -1,22 +1,33 @@
-사잇말 통합 패치 v1.4.1 (v1.4.0 + v1.4.1)
+사잇말 v1.4.4 패치 (100% 규칙 강제 + '인간적' 유사도 강화: 2단계 리랭킹)
 
-포함:
-- v1.4.0: 정답/랭킹 기준 통일(meta/top/guess 동일 정답 사용), dateKey를 KST 기준으로 통일
-- v1.4.1: 추론 입력(엔터/버튼) 시 즉시 '추측한 단어'에 표시(낙관적 UI) + PATCHLOG 누적 기록
+요구 반영
+1) percent 규칙
+- 정답(rank=1)만 100.00
+- 그 외(rank>=2)는 최대 99.99로 캡
 
-변경 파일:
-- saitmal-main/functions/api/meta.js
-- saitmal-main/functions/api/top.js
-- saitmal-main/functions/api/guess.js
-- saitmal-main/public/app.js
-- PATCHLOG.md (추가)
+2) 유사도(랭킹) 로직을 '인간이 납득'하도록 강화 (무료/경량, D1 내에서)
+- 1차 후보: FTS(bm25)로 넓게 후보군 추출(기존)
+- 2차 리랭킹: 상위 후보 일부(RERANK_N)만 가져와
+  "정답 정의와 후보 정의의 핵심 토큰 겹침(가중치)"을 계산해 bm25와 합산하여 재정렬
+  => 의미적으로 관련된 단어가 상위로 오를 확률 증가
 
-적용 순서:
-1) ZIP 풀기
-2) 위 파일들을 저장소에 덮어쓰기
-3) 배포(커밋/푸시)
-4) 한 번만 실행: /api/top?limit=10&build=1  (오늘자 랭킹 재생성)
-5) 확인: /api/top?limit=10  ,  게임 화면에서 입력 후 Enter/추론 버튼 -> 즉시 리스트 표시
+구체
+- 정답 정의에서 TF-IDF 유사 방식으로 키워드 추출(기존 v1.4.3)
+- 후보 정의는 answer_sense에서 group_concat로 합쳐 1개 텍스트로 만든 뒤
+  정답 키워드/구를 얼마나 포함하는지 점수화
+- 동일 품사(pos) 필터 유지
+- 변수 제한/CPU 제한 대비: 리랭킹 대상만 제한(기본 1200개) + chunk 처리
 
-주의:
-- build=1은 운영 시 관리자 키로 잠그는 것을 권장
+변경 파일
+- saitmal-main/functions/lib/rank.js
+
+적용
+1) 파일 덮어쓰기
+2) 배포
+3) /api/top?limit=20&build=1 (랭킹 재생성)
+4) /api/top?limit=30 로 품질 확인
+
+튜닝용 환경변수(선택)
+- RANK_TOPK (기본 3000)
+- RANK_CANDIDATE_LIMIT (기본 12000)
+- RANK_RERANK_N (기본 1200)
